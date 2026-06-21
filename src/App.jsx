@@ -162,6 +162,17 @@ function createAiImageHolderAtViewportCenter(editor) {
   editor.setCurrentTool('select.idle')
 }
 
+function canvasIsEmpty(editor) {
+  return !Object.values(editor.store.getStoreSnapshot().store).some(
+    (record) => record?.typeName === 'shape'
+  )
+}
+
+function createInitialAiImageHolderForEmptyCanvas(editor) {
+  if (!canvasIsEmpty(editor)) return
+  createAiImageHolderAtViewportCenter(editor)
+}
+
 function startEditingAnnotationArrowLabel(editor, arrowId) {
   const shape = editor.getShape(arrowId)
   if (!shape || !editor.canEditShape(shape)) {
@@ -732,6 +743,7 @@ export default function App() {
 
     editor.timers.requestAnimationFrame(() => {
       restoreCowartViewState(editor, viewState)
+      createInitialAiImageHolderForEmptyCanvas(editor)
     })
 
     async function syncSelectionState() {

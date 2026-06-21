@@ -17,7 +17,7 @@ Run this from the Cowart repository root. Use the active workspace or project di
 
 2. Open the resulting local URL in the Codex in-app browser when the Browser tool chain is available.
 
-The default URL is `http://127.0.0.1:43217/`. If the service output prints a different `Local:` URL, open that actual URL instead.
+The default URL is `http://127.0.0.1:43217/`. If the service output prints a different `Local:` URL, open that actual URL instead. When the canvas is empty, Cowart automatically creates one initial AI image holder; no special URL parameter is needed.
 
 Use the Browser plugin's `control-in-app-browser` skill as the source of truth for opening the in-app browser. The correct model-side flow is:
 

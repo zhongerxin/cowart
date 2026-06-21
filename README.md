@@ -100,14 +100,14 @@ canvas/pages/<page-id>/assets/
 ### 生成新图
 
 1. 打开 Cowart 画布。
-2. 在画布里创建并选中一个 AI image holder。
+2. 可以在画布里创建并选中一个 AI image holder，用来指定图片尺寸和位置。
 3. 在 Codex 中描述要生成的图片，例如：
 
 ```text
 Generate a new image into the selected Cowart AI image holder.
 ```
 
-Codex 会读取选中的 holder，按它的比例生成图片，并插入到 holder 中。
+打开空白画布时，Cowart 会自动创建一个 AI image holder，方便第一次生成图片时直接使用。如果画布已有内容，Cowart 不会自动添加新的 holder；你仍然可以在画布里手动创建或选中其他 holder 来指定图片尺寸和位置。选中 holder 时，Codex 会读取它的比例生成图片，并插入到 holder 中。
 
 ![使用 Cowart 生成并插入新图](assets/generate-image.png)
 

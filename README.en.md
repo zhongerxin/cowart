@@ -100,14 +100,14 @@ canvas/pages/<page-id>/assets/
 ### Generate A New Image
 
 1. Open the Cowart canvas.
-2. Create and select an AI image holder on the canvas.
+2. Optionally create and select an AI image holder on the canvas to define the image size and placement.
 3. Describe the image you want Codex to generate, for example:
 
 ```text
 Generate a new image into the selected Cowart AI image holder.
 ```
 
-Codex reads the selected holder, matches its aspect ratio, generates the image, and inserts it into the holder.
+When an empty canvas is opened, Cowart automatically creates one AI image holder so the first image generation has a ready target. If the canvas already has content, Cowart does not add another holder automatically; you can still create or select another holder on the canvas to define the image size and placement. When a holder is selected, Codex reads its aspect ratio, generates the image, and inserts it into the holder.
 
 ![Generate and insert a new image with Cowart](assets/generate-image.png)
 

@@ -1,7 +1,6 @@
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import readline from "node:readline";
-import { generateKeyBetween } from "fractional-indexing";
 
 const SERVER_NAME = "Cowart MCP";
 const SERVER_VERSION = "0.1.1";
@@ -10,6 +9,7 @@ const TOOL_INSERT_IMAGE = "insert_cowart_image";
 const PAGE_ID_PREFIX = "page:";
 const PAGE_ASSETS_ROUTE = "/page-assets/";
 const CANVAS_FILE_NAME = "cowart-canvas.json";
+const BASE_62_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -26,6 +26,84 @@ function sendResult(id, result) {
 
 function sendError(id, code, message) {
   send({ jsonrpc: "2.0", id, error: { code, message } });
+}
+
+function getIntegerLength(head) {
+  if (head >= "a" && head <= "z") return head.charCodeAt(0) - "a".charCodeAt(0) + 2;
+  if (head >= "A" && head <= "Z") return "Z".charCodeAt(0) - head.charCodeAt(0) + 2;
+  throw new Error(`invalid order key head: ${head}`);
+}
+
+function validateInteger(int) {
+  if (int.length !== getIntegerLength(int[0])) throw new Error(`invalid integer part of order key: ${int}`);
+}
+
+function getIntegerPart(key) {
+  const integerPartLength = getIntegerLength(key[0]);
+  if (integerPartLength > key.length) throw new Error(`invalid order key: ${key}`);
+  return key.slice(0, integerPartLength);
+}
+
+function validateOrderKey(key, digits = BASE_62_DIGITS) {
+  if (key === `A${digits[0].repeat(26)}`) throw new Error(`invalid order key: ${key}`);
+  const integer = getIntegerPart(key);
+  const fractional = key.slice(integer.length);
+  if (fractional.endsWith(digits[0])) throw new Error(`invalid order key: ${key}`);
+}
+
+function midpoint(a, b, digits = BASE_62_DIGITS) {
+  const zero = digits[0];
+  if (b != null && a >= b) throw new Error(`${a} >= ${b}`);
+  if (a.endsWith(zero) || b?.endsWith(zero)) throw new Error("trailing zero");
+
+  if (b) {
+    let n = 0;
+    while ((a[n] || zero) === b[n]) n += 1;
+    if (n > 0) return b.slice(0, n) + midpoint(a.slice(n), b.slice(n), digits);
+  }
+
+  const digitA = a ? digits.indexOf(a[0]) : 0;
+  const digitB = b != null ? digits.indexOf(b[0]) : digits.length;
+  if (digitB - digitA > 1) return digits[Math.round(0.5 * (digitA + digitB))];
+  if (b && b.length > 1) return b.slice(0, 1);
+  return digits[digitA] + midpoint(a.slice(1), null, digits);
+}
+
+function incrementInteger(value, digits = BASE_62_DIGITS) {
+  validateInteger(value);
+  const [head, ...rest] = value.split("");
+  let carry = true;
+  for (let i = rest.length - 1; carry && i >= 0; i -= 1) {
+    const digit = digits.indexOf(rest[i]) + 1;
+    if (digit === digits.length) {
+      rest[i] = digits[0];
+    } else {
+      rest[i] = digits[digit];
+      carry = false;
+    }
+  }
+
+  if (!carry) return head + rest.join("");
+  if (head === "Z") return `a${digits[0]}`;
+  if (head === "z") return null;
+
+  const nextHead = String.fromCharCode(head.charCodeAt(0) + 1);
+  if (nextHead > "a") rest.push(digits[0]);
+  else rest.pop();
+  return nextHead + rest.join("");
+}
+
+function generateKeyBetween(a, b) {
+  if (a != null) validateOrderKey(a);
+  if (b != null) validateOrderKey(b);
+  if (a != null && b != null && a >= b) throw new Error(`${a} >= ${b}`);
+  if (a == null && b == null) return `${"a"}${BASE_62_DIGITS[0]}`;
+  if (a == null) throw new Error("Cowart MCP only appends shapes after existing indexes");
+
+  const integer = getIntegerPart(a);
+  const fractional = a.slice(integer.length);
+  const nextInteger = incrementInteger(integer);
+  return nextInteger == null ? integer + midpoint(fractional, null) : nextInteger;
 }
 
 function nonEmptyString(value) {

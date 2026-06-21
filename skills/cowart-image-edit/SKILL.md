@@ -58,6 +58,16 @@ The user is responsible for providing the relevant screenshot(s). Do not auto-ca
    annotation-edit-20260620-153012.png
    ```
 
+   Resolve the actual local output image carefully before inserting it into Cowart. Do not assume the built-in image generation flow always writes a fresh file under `$CODEX_HOME/generated_images`.
+
+   Preferred resolution order:
+
+   - Use the exact local image path returned by the current image generation tool call when one is available.
+   - If no new file path is returned, inspect the current Codex session JSONL for the current request and extract the PNG/base64 payload from the latest `image_generation_call.result`, then write it to the timestamped output filename.
+   - Use `$CODEX_HOME/generated_images` only when you can prove the file was created by the current request, for example by matching its timestamp after this generation step. Never pick an older image merely because it is the newest file in a stale generated_images directory.
+
+   Before inserting the resolved file into Cowart, visually inspect the local bitmap and confirm it is the newly generated revised image for this screenshot, not a stale generated asset.
+
 6. Insert the revised image beside the original with Cowart MCP.
 
    Prefer the Cowart MCP `insert_cowart_image` tool. Do not hand-write

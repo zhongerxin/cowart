@@ -73,7 +73,17 @@ meta flag. Support both shapes.
 
 4. Generate the bitmap with the built-in `imagegen` skill unless the user explicitly requests another image path. If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
 
-   For project-bound output, copy the selected generated image from `$CODEX_HOME/generated_images/...` into the selected page's asset folder:
+   Resolve the actual local output image carefully before inserting it into Cowart. Do not assume the built-in image generation flow always writes a fresh file under `$CODEX_HOME/generated_images`.
+
+   Preferred resolution order:
+
+   - Use the exact local image path returned by the current image generation tool call when one is available.
+   - If no new file path is returned, inspect the current Codex session JSONL for the current request and extract the PNG/base64 payload from the latest `image_generation_call.result`, then write it to a timestamped output filename.
+   - Use `$CODEX_HOME/generated_images` only when you can prove the file was created by the current request, for example by matching its timestamp after this generation step. Never pick an older image merely because it is the newest file in a stale generated_images directory.
+
+   Before inserting the resolved file into Cowart, visually inspect the local bitmap and confirm it is the newly generated image for this request, not a stale generated asset.
+
+   For project-bound output, copy the resolved generated image into the selected page's asset folder:
 
    ```text
    canvas/pages/<page-id-without-page-prefix>/assets/

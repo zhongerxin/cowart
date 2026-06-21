@@ -126,7 +126,7 @@ Codex reads the notes and arrows in the screenshot, generates a clean revised im
 ## Skills
 
 - `cowart:cowart-open-canvas`: open the local Cowart canvas.
-- `cowart:cowart-imgae-gen`: insert a generated image into the selected AI image holder.
+- `cowart:cowart-image-gen`: insert a generated image into the selected AI image holder.
 - `cowart:cowart-image-edit`: generate a revised image from a user-provided Cowart annotation screenshot.
 
 ## Local Development

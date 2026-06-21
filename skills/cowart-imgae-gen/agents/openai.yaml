@@ -1,7 +1,0 @@
-interface:
-  display_name: "Cowart Imgae Gen"
-  short_description: "Generate an image into a selected Cowart AI holder"
-  default_prompt: "Use $cowart:cowart-imgae-gen to generate an image into the selected Cowart AI image holder."
-
-policy:
-  allow_implicit_invocation: true

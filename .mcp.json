@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "cowart_mcp": {
-      "command": "node",
+      "command": "bash",
       "args": [
-        "./mcp/server.mjs"
+        "./scripts/start-mcp.sh"
       ],
       "cwd": "."
     }

@@ -21,7 +21,7 @@ Send the following message to Codex:
 ```text
 Please install the Cowart Codex plugin from https://github.com/zhongerxin/cowart.git.
 Clone the repository into ~/plugins/cowart, verify that .codex-plugin/plugin.json exists,
-add the plugin to the personal marketplace, then run codex plugin add cowart@personal.
+run npm install and npm run build, then run codex plugin marketplace add ~/plugins/cowart.
 After installing, validate the plugin and tell me whether I should start a new conversation to load the new skills and MCP tools.
 ```
 
@@ -37,38 +37,14 @@ npm install
 npm run build
 ```
 
-Make sure `~/.agents/plugins/marketplace.json` contains a Cowart entry:
-
-```json
-{
-  "name": "personal",
-  "interface": {
-    "displayName": "Personal"
-  },
-  "plugins": [
-    {
-      "name": "cowart",
-      "source": {
-        "source": "local",
-        "path": "./plugins/cowart"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    }
-  ]
-}
-```
-
-Then install the plugin:
+The repository includes a Codex marketplace manifest. Register the local repository as a marketplace:
 
 ```bash
-codex plugin add cowart@personal
+codex plugin marketplace add ~/plugins/cowart
 ```
 
-After installing, start a new Codex conversation so the new skills and MCP tools are loaded cleanly.
+If your Codex version still provides `codex plugin add` / `plugin install` commands, you can also enable `cowart@personal` through that version's plugin UI or CLI.
+After installing, start a new Codex conversation, or restart Codex Desktop if needed, so the new skills and MCP tools are loaded cleanly.
 
 ## Usage
 

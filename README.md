@@ -21,7 +21,8 @@ English README: [README.en.md](README.en.md)
 ```text
 请从 https://github.com/zhongerxin/cowart.git 安装 Cowart Codex 插件。
 请 clone 仓库到 ~/plugins/cowart，确认 .codex-plugin/plugin.json 存在，
-运行 npm install 和 npm run build，然后运行 codex plugin marketplace add ~/plugins/cowart。
+运行 npm install 和 npm run build，把 Cowart 条目加入 ~/.agents/plugins/marketplace.json，
+然后运行 codex plugin marketplace add ~ 并启用 cowart@personal。
 安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
 ```
 
@@ -37,13 +38,38 @@ npm install
 npm run build
 ```
 
-仓库已包含 Codex marketplace manifest。把本地仓库注册为 marketplace：
+确保 `~/.agents/plugins/marketplace.json` 中包含 Cowart 条目：
 
-```bash
-codex plugin marketplace add ~/plugins/cowart
+```json
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "Personal"
+  },
+  "plugins": [
+    {
+      "name": "cowart",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cowart"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
 ```
 
-如果你的 Codex 版本仍提供 `codex plugin add` / `plugin install` 类命令，也可以按该版本的插件 UI 或 CLI 启用 `cowart@personal`。
+然后把用户主目录注册为 personal marketplace：
+
+```bash
+codex plugin marketplace add ~
+```
+
+在 Codex 的插件 UI 或配置中启用 `cowart@personal`。如果你的 Codex 版本仍提供 `codex plugin add` / `plugin install` 类命令，也可以按该版本的插件 UI 或 CLI 启用。
 安装后建议开启一个新的 Codex 对话，必要时重启 Codex Desktop，让新的 skill 和 MCP 工具完整加载。
 
 ## 使用
@@ -54,6 +80,12 @@ codex plugin marketplace add ~/plugins/cowart
 
 ```text
 Open the Cowart canvas for this project.
+```
+
+如果插件命令已加载，也可以在 slash 菜单中运行：
+
+```text
+/cowart:cowart-canvas
 ```
 
 Cowart 会启动本地服务，默认地址是：

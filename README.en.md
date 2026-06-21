@@ -21,7 +21,8 @@ Send the following message to Codex:
 ```text
 Please install the Cowart Codex plugin from https://github.com/zhongerxin/cowart.git.
 Clone the repository into ~/plugins/cowart, verify that .codex-plugin/plugin.json exists,
-run npm install and npm run build, then run codex plugin marketplace add ~/plugins/cowart.
+run npm install and npm run build, add Cowart to ~/.agents/plugins/marketplace.json,
+then run codex plugin marketplace add ~ and enable cowart@personal.
 After installing, validate the plugin and tell me whether I should start a new conversation to load the new skills and MCP tools.
 ```
 
@@ -37,13 +38,38 @@ npm install
 npm run build
 ```
 
-The repository includes a Codex marketplace manifest. Register the local repository as a marketplace:
+Make sure `~/.agents/plugins/marketplace.json` contains a Cowart entry:
 
-```bash
-codex plugin marketplace add ~/plugins/cowart
+```json
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "Personal"
+  },
+  "plugins": [
+    {
+      "name": "cowart",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cowart"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
 ```
 
-If your Codex version still provides `codex plugin add` / `plugin install` commands, you can also enable `cowart@personal` through that version's plugin UI or CLI.
+Then register the user home directory as the personal marketplace:
+
+```bash
+codex plugin marketplace add ~
+```
+
+Enable `cowart@personal` in the Codex plugin UI or configuration. If your Codex version still provides `codex plugin add` / `plugin install` commands, you can also enable it through that version's plugin UI or CLI.
 After installing, start a new Codex conversation, or restart Codex Desktop if needed, so the new skills and MCP tools are loaded cleanly.
 
 ## Usage
@@ -54,6 +80,12 @@ Ask Codex:
 
 ```text
 Open the Cowart canvas for this project.
+```
+
+If plugin commands are loaded, you can also run it from the slash menu:
+
+```text
+/cowart:cowart-canvas
 ```
 
 Cowart starts a local service at:

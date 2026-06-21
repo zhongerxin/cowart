@@ -67,15 +67,43 @@ meta flag. Support both shapes.
 
    If the holder is a legacy `geo` rectangle, keep using the legacy placement contract: same `x`, `y`, `rotation`, `parentId`, `props.w`, and `props.h` as the holder.
 
-4. Generate the bitmap with the built-in `imagegen` skill unless the user explicitly requests another image path. If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
+4. Record a generation cutoff timestamp before calling the image tool:
 
-   For project-bound output, copy the selected generated image from `$CODEX_HOME/generated_images/...` into the selected page's asset folder:
+   ```bash
+   date -u +"%Y-%m-%dT%H:%M:%SZ"
+   ```
+
+5. Generate the bitmap with the built-in `imagegen` skill unless the user explicitly requests another image path. If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
+
+6. Resolve the actual generated bitmap file. Do not assume that `$CODEX_HOME/generated_images/...` contains the latest built-in image output; some Codex desktop sessions store the generated PNG directly in the session JSONL as `image_generation_call.result` base64 without writing a new file under `generated_images`.
+
+   First, look for a generated image file modified after the cutoff timestamp:
+
+   ```bash
+   find "${CODEX_HOME:-$HOME/.codex}/generated_images" -type f \
+     \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' \) \
+     -newermt "<cutoff-timestamp>" -print
+   ```
+
+   If no new file exists, extract the latest built-in image result from the Codex session JSONL:
+
+   ```bash
+   node skills/cowart-image-gen/scripts/extract-latest-imagegen-result.mjs \
+     --after "<cutoff-timestamp>" \
+     --out /tmp/cowart-imagegen-result.png
+   ```
+
+   The helper defaults to the newest session under `${CODEX_HOME:-$HOME/.codex}/sessions`. Pass `--session /path/to/session.jsonl` if the current session is not the newest session file.
+
+7. Inspect the resolved local image before inserting it. Use `view_image` when available, or another direct visual check. Continue only after confirming that the local file matches the user's prompt. Never insert a file selected only by "latest directory" or by an old `generated_images` folder name.
+
+   For project-bound output, copy the verified local generated image into the selected page's asset folder:
 
    ```text
    canvas/pages/<page-id-without-page-prefix>/assets/
    ```
 
-5. Insert the generated image as a new tldraw image shape exactly over the holder:
+8. Insert the verified generated image as a new tldraw image shape exactly over the holder:
 
    - `type`: `image`
    - `parentId`: holder id for frame holders, same as holder parent for legacy geo holders
@@ -84,9 +112,9 @@ meta flag. Support both shapes.
    - `props.assetId`: the new image asset id
    - `meta.cowartGeneratedForAiImageHolder`: holder shape id
 
-6. Do not delete the holder unless the user explicitly asks for replacement. Keeping the holder lets Codex identify the intended slot again later.
+9. Do not delete the holder unless the user explicitly asks for replacement. Keeping the holder lets Codex identify the intended slot again later.
 
-7. Save through Cowart's API or edit the page snapshot carefully:
+10. Save through Cowart's API or edit the page snapshot carefully:
 
    ```bash
    curl -s http://127.0.0.1:43217/api/canvas
@@ -98,7 +126,7 @@ meta flag. Support both shapes.
    /page-assets/<page-id-without-page-prefix>/<filename>
    ```
 
-8. Refresh or let the browser hot-reload, then confirm the inserted shape id, holder id, final dimensions, and saved asset path.
+11. Refresh or let the browser hot-reload, then confirm the inserted shape id, holder id, final dimensions, and saved asset path.
 
 ## Notes
 

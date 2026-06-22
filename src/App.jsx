@@ -123,7 +123,7 @@ function getAiImageHolderMeta() {
   }
 }
 
-function createAiImageHolderShape(editor, id, shapeOverrides = {}) {
+function createAiImageHolderShape(editor, id, shapeOverrides = { width: AI_IMAGE_HOLDER_DEFAULT_W, height: AI_IMAGE_HOLDER_DEFAULT_H }) {
   const scale = editor.getResizeScaleFactor()
   const { meta, props, ...shapeRecordOverrides } = shapeOverrides
   const { scale: _scale, ...frameProps } = props ?? {}

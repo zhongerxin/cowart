@@ -695,10 +695,10 @@ export default function App() {
           fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal })
         ])
         if (!canvasResponse.ok) {
-          throw new Error(`Failed to load canvas: ${canvasResponse.status}`)
+          throw new Error(`Failed to load canvas: ${canvasResponse.status} - ${canvasResponse.statusText}`)
         }
         if (!viewStateResponse.ok) {
-          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status}`)
+          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status} - ${viewStateResponse.statusText}`)
         }
         const [canvasData, viewStateData] = await Promise.all([
           canvasResponse.json(),

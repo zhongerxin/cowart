@@ -160,3 +160,14 @@ https://www.jiqiren.ai
 ## 致谢
 
 Cowart 的画布能力基于 [tldraw/tldraw](https://github.com/tldraw/tldraw) 实现。
+
+## Contributing
+
+We welcome contributions to Cowart! Here are some ways you can help:
+
+1. **Reporting Issues**: If you encounter any bugs or have suggestions for improvements, please open an issue in the GitHub repository.
+2. **Submitting Pull Requests**: If you would like to contribute code, please fork the repository, make your changes, and submit a pull request. Ensure your code follows the existing style and includes tests where applicable.
+3. **Documentation Improvements**: Help us improve our documentation by suggesting edits or adding new sections.
+4. **Feature Requests**: If you have an idea for a new feature, feel free to discuss it in an issue before implementing it.
+
+Thank you for considering contributing to Cowart!

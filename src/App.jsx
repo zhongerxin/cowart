@@ -639,6 +639,23 @@ const cowartUiOverrides = {
       'tool.cowart-annotation': ANNOTATION_TOOL_LABEL
     }
   },
+  actions(editor, actions) {
+    return {
+      ...actions,
+      paste: {
+        ...actions.paste,
+        kbd: undefined
+      },
+      'paste-at-cursor': {
+        ...actions['paste-at-cursor'],
+        kbd: undefined
+      },
+      'paste-plain-text-at-cursor': {
+        ...actions['paste-plain-text-at-cursor'],
+        kbd: undefined
+      }
+    }
+  },
   tools(editor, tools) {
     return {
       ...tools,
@@ -691,6 +708,58 @@ const cowartUiOverrides = {
 const cowartComponents = {
   Toolbar: CowartToolbar,
   StylePanel: CowartStylePanel
+}
+
+function getFilesFromPasteEvent(event) {
+  const clipboardData = event.clipboardData
+  if (!clipboardData) return []
+
+  const files = Array.from(clipboardData.files ?? [])
+  if (files.length > 0) return files
+
+  return Array.from(clipboardData.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter(Boolean)
+}
+
+function getTextFromPasteEvent(event) {
+  const clipboardData = event.clipboardData
+  if (!clipboardData) return null
+
+  const html = clipboardData.getData('text/html')
+  const text = clipboardData.getData('text/plain')
+  if (!html && !text) return null
+
+  return { html, text }
+}
+
+const cowartTldrawOptions = {
+  onClipboardPasteRaw(info) {
+    if (info.source !== 'native-event') return
+
+    const files = getFilesFromPasteEvent(info.event)
+    if (files.length > 0) {
+      void info.editor.putExternalContent({
+        type: 'files',
+        files,
+        point: info.point
+      })
+      return false
+    }
+
+    const textContent = getTextFromPasteEvent(info.event)
+    if (textContent) {
+      void info.editor.putExternalContent({
+        type: 'text',
+        ...textContent,
+        point: info.point
+      })
+      return false
+    }
+
+    return false
+  }
 }
 
 function CowartStylePanel(props) {
@@ -1428,6 +1497,7 @@ export default function App() {
         components={cowartComponents}
         shapeUtils={cowartShapeUtils}
         tools={[CowartAnnotationTool]}
+        options={cowartTldrawOptions}
       />
     </main>
   )

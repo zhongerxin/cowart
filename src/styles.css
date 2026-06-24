@@ -326,6 +326,10 @@ body {
 }
 
 .cowart-ai-aspect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
 
 .cowart-inspector-header p {
   margin: 0;

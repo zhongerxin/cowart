@@ -19,6 +19,14 @@ Run this from the Cowart repository root. Use the active workspace or project di
 
 The default URL is `http://127.0.0.1:43217/`. If the service output prints a different `Local:` URL, open that actual URL instead.
 
+When a stable Codex thread/session id is available, open the canvas with `?sessionId=<id>` appended, for example:
+
+```text
+http://127.0.0.1:43217/?sessionId=<codex-thread-id>
+```
+
+Use a different `sessionId` for each Codex conversation. This makes the first opened Cowart page, view state, and selection state session-scoped while keeping all pages visible in the same tldraw document. The service also accepts `/sessionId=<id>` for compatibility, but the query-string form is preferred.
+
 Use the Browser plugin's `control-in-app-browser` skill as the source of truth for opening the in-app browser. The correct model-side flow is:
 
 1. Use tool discovery for the Node REPL JavaScript execution tool if it is not already visible. The required callable tool is the `js` execution tool, commonly exposed as `mcp__node_repl__js`; `js_reset` and `js_add_node_module_dir` are not sufficient for browser control.

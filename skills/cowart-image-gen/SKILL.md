@@ -15,6 +15,13 @@ The Cowart service should be running for the user's active project, usually at:
 http://127.0.0.1:43217
 ```
 
+If the current Cowart browser URL contains `sessionId`, keep using that same
+session for every API or MCP call. Prefer the query-string form:
+
+```text
+http://127.0.0.1:43217/?sessionId=<codex-thread-id>
+```
+
 New holders are tldraw `frame` shapes with:
 
 ```json
@@ -37,7 +44,13 @@ meta flag. Support both shapes.
    curl -s http://127.0.0.1:43217/api/selection
    ```
 
-   You can also use the Cowart MCP `get_cowart_selection` tool if it is available.
+   If working inside a session URL, include the same session:
+
+   ```bash
+   curl -s 'http://127.0.0.1:43217/api/selection?sessionId=<codex-thread-id>'
+   ```
+
+   You can also use the Cowart MCP `get_cowart_selection` tool if it is available. Pass `sessionId` when the canvas URL has one.
 
 2. Check whether exactly one selected shape is an AI image holder. A holder is any selected shape with either:
 
@@ -133,6 +146,8 @@ meta flag. Support both shapes.
    ```bash
    curl -s http://127.0.0.1:43217/api/canvas
    ```
+
+   If working inside a session URL, include the same `sessionId` in API calls or pass it to Cowart MCP tools. This keeps standalone insertions on that session's current/default page instead of the legacy global page.
 
    Prefer page-local asset URLs in the image asset:
 

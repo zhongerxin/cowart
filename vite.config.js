@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 const projectDir = resolve(process.env.COWART_PROJECT_DIR ?? process.cwd())
@@ -10,6 +10,7 @@ const canvasDir = resolve(process.env.COWART_CANVAS_DIR ?? join(projectDir, 'can
 const canvasFile = join(canvasDir, 'cowart-canvas.json')
 const selectionFile = join(canvasDir, 'cowart-selection.json')
 const viewStateFile = join(canvasDir, 'cowart-view-state.json')
+const settingsFile = join(canvasDir, 'cowart-settings.json')
 const canvasPagesDir = join(canvasDir, 'pages')
 const canvasAssetsDir = join(canvasDir, 'assets')
 const pagesManifestFile = join(canvasPagesDir, 'manifest.json')
@@ -20,6 +21,28 @@ const pageAssetsRoute = '/page-assets/'
 const canvasEventClients = new Set()
 let canvasEventVersion = 0
 let canvasSnapshotSanitizerPromise = null
+const defaultCanvasSettings = {
+  version: 1,
+  backgroundColor: '#f7f5ef',
+  showGrid: false,
+  aiImageHolderWidth: 320,
+  aiImageHolderHeight: 220,
+  annotationColor: 'red'
+}
+const allowedAnnotationColors = new Set([
+  'black',
+  'grey',
+  'light-violet',
+  'violet',
+  'blue',
+  'light-blue',
+  'yellow',
+  'orange',
+  'green',
+  'light-green',
+  'light-red',
+  'red'
+])
 
 const mimeTypes = new Map([
   ['.apng', 'image/apng'],
@@ -112,6 +135,33 @@ function isViewState(value) {
     isFiniteNumber(value.camera.y) &&
     isFiniteNumber(value.camera.z)
   )
+}
+
+function normalizeCanvasSettings(value) {
+  const settings = value && typeof value === 'object' ? value : {}
+  const backgroundColor =
+    typeof settings.backgroundColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(settings.backgroundColor)
+      ? settings.backgroundColor
+      : defaultCanvasSettings.backgroundColor
+  const aiImageHolderWidth = isFiniteNumber(settings.aiImageHolderWidth)
+    ? Math.min(Math.max(Math.round(settings.aiImageHolderWidth), 80), 2400)
+    : defaultCanvasSettings.aiImageHolderWidth
+  const aiImageHolderHeight = isFiniteNumber(settings.aiImageHolderHeight)
+    ? Math.min(Math.max(Math.round(settings.aiImageHolderHeight), 80), 2400)
+    : defaultCanvasSettings.aiImageHolderHeight
+  const annotationColor = allowedAnnotationColors.has(settings.annotationColor)
+    ? settings.annotationColor
+    : defaultCanvasSettings.annotationColor
+
+  return {
+    ...defaultCanvasSettings,
+    backgroundColor,
+    showGrid: Boolean(settings.showGrid),
+    aiImageHolderWidth,
+    aiImageHolderHeight,
+    annotationColor,
+    updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : null
+  }
 }
 
 function isSafeChildPath(parent, child) {
@@ -386,12 +436,32 @@ async function writeJsonAtomic(filePath, payload) {
   await rename(tempFile, filePath)
 }
 
+async function removeStalePageDirs(currentPageIds) {
+  let entries
+  try {
+    entries = await readdir(canvasPagesDir, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+
+  const currentDirNames = new Set([...currentPageIds].map(pageDirName))
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !currentDirNames.has(entry.name))
+      .map((entry) => rm(join(canvasPagesDir, entry.name), { recursive: true, force: true }))
+  )
+}
+
 async function saveCanvasSnapshot(snapshot) {
   const pages = getPageRecords(snapshot)
   if (pages.length === 0) {
     await writeJsonAtomic(canvasFile, snapshot)
     return { storage: 'legacy-single-file', paths: [canvasFile] }
   }
+
+  const currentPageIds = new Set(pages.map((page) => page.id))
+  await removeStalePageDirs(currentPageIds)
 
   const paths = []
   for (const page of pages) {
@@ -562,6 +632,47 @@ function canvasStoragePlugin() {
 
             await writeJsonAtomic(viewStateFile, viewState)
             sendJson(res, 200, { ok: true, path: viewStateFile })
+            return
+          }
+
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/settings', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            try {
+              sendJson(res, 200, {
+                settings: normalizeCanvasSettings(await readJsonFile(settingsFile)),
+                path: settingsFile
+              })
+            } catch (error) {
+              if (error.code === 'ENOENT') {
+                sendJson(res, 200, {
+                  settings: normalizeCanvasSettings(null),
+                  path: settingsFile
+                })
+                return
+              }
+              throw error
+            }
+            return
+          }
+
+          if (req.method === 'PUT') {
+            const body = await readRequestBody(req)
+            const settings = normalizeCanvasSettings(JSON.parse(body))
+            const payload = {
+              ...settings,
+              updatedAt: new Date().toISOString()
+            }
+            await writeJsonAtomic(settingsFile, payload)
+            sendJson(res, 200, { ok: true, settings: payload, path: settingsFile })
             return
           }
 

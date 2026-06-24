@@ -44,18 +44,17 @@ import {
 } from 'tldraw'
 import { AllSelection } from '@tiptap/pm/state'
 import 'tldraw/tldraw.css'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import annotationToolIconRaw from './assets/tool-comment.svg?raw'
-import {
-  describeSkippedRecord,
-  isCanvasSnapshot,
-  sanitizeCanvasSnapshotForTldraw
-} from './canvasSnapshot.js'
+import CowartInspector from './components/CowartInspector.jsx'
+import { CowartImageShapeUtil } from './components/CowartImageShapeUtil.jsx'
+import { isCanvasSnapshot, sanitizeCanvasSnapshotForTldraw } from './canvasSnapshot.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
 const SELECTION_ENDPOINT = '/api/selection'
 const VIEW_STATE_ENDPOINT = '/api/view-state'
+const SETTINGS_ENDPOINT = '/api/settings'
 const SELECTION_STATE_ELEMENT_ID = 'cowart-selection-state'
 const AI_IMAGE_TOOL_ID = 'ai-image'
 const AI_IMAGE_HOLDER_LABEL = 'AI 图片'
@@ -82,6 +81,39 @@ const ANNOTATION_MAX_BEND = 48
 const ANNOTATION_LABEL_POSITION = 0
 const ANNOTATION_SELECT_TEXT_MAX_ATTEMPTS = 8
 const ANNOTATION_SELECT_TEXT_SETTLE_ATTEMPTS = 4
+const DEFAULT_CANVAS_SETTINGS = {
+  version: 1,
+  backgroundColor: '#f7f5ef',
+  showGrid: false,
+  aiImageHolderWidth: AI_IMAGE_HOLDER_DEFAULT_W,
+  aiImageHolderHeight: AI_IMAGE_HOLDER_DEFAULT_H,
+  annotationColor: ANNOTATION_DEFAULT_COLOR
+}
+const ANNOTATION_COLOR_OPTIONS = [
+  { value: 'red', label: '红色', swatch: '#e5484d' },
+  { value: 'orange', label: '橙色', swatch: '#f76b15' },
+  { value: 'yellow', label: '黄色', swatch: '#f5d90a' },
+  { value: 'green', label: '绿色', swatch: '#30a46c' },
+  { value: 'blue', label: '蓝色', swatch: '#3e63dd' },
+  { value: 'violet', label: '紫色', swatch: '#7c3aed' },
+  { value: 'black', label: '黑色', swatch: '#1f2430' },
+  { value: 'grey', label: '灰色', swatch: '#697386' }
+]
+const TL_COLOR_OPTIONS = [
+  { value: 'black', swatch: '#1f2430' },
+  { value: 'grey', swatch: '#697386' },
+  { value: 'light-violet', swatch: '#b8a3ff' },
+  { value: 'violet', swatch: '#7c3aed' },
+  { value: 'blue', swatch: '#3e63dd' },
+  { value: 'light-blue', swatch: '#8ec5ff' },
+  { value: 'yellow', swatch: '#f5d90a' },
+  { value: 'orange', swatch: '#f76b15' },
+  { value: 'green', swatch: '#30a46c' },
+  { value: 'light-green', swatch: '#8fd19e' },
+  { value: 'light-red', swatch: '#f39aa0' },
+  { value: 'red', swatch: '#e5484d' },
+  { value: 'white', swatch: '#ffffff' }
+]
 const annotationToolIconSvg = annotationToolIconRaw.replaceAll('black', 'currentColor')
 const annotationToolIcon = (
   <div
@@ -89,6 +121,150 @@ const annotationToolIcon = (
     dangerouslySetInnerHTML={{ __html: annotationToolIconSvg }}
   />
 )
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(Math.max(Math.round(number), min), max)
+}
+
+function normalizeHexColor(value) {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().replace(/^#/, '')
+
+  if (/^[0-9a-fA-F]{3}$/.test(normalized)) {
+    return `#${normalized
+      .split('')
+      .map((char) => char + char)
+      .join('')
+      .toLowerCase()}`
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `#${normalized.toLowerCase()}`
+  }
+
+  return null
+}
+
+function hexToRgb(value) {
+  const normalized = normalizeHexColor(value)
+  if (!normalized) return null
+
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16)
+  }
+}
+
+function resolveTldrawColor(value, fallback = 'black') {
+  if (TL_COLOR_OPTIONS.some((option) => option.value === value)) {
+    return value
+  }
+
+  const targetColor = hexToRgb(value)
+  if (!targetColor) return fallback
+
+  let closestOption = TL_COLOR_OPTIONS.find((option) => option.value === fallback) ?? TL_COLOR_OPTIONS[0]
+  let closestDistance = Number.POSITIVE_INFINITY
+
+  for (const option of TL_COLOR_OPTIONS) {
+    const optionColor = hexToRgb(option.swatch)
+    if (!optionColor) continue
+
+    const distance =
+      (targetColor.r - optionColor.r) ** 2 +
+      (targetColor.g - optionColor.g) ** 2 +
+      (targetColor.b - optionColor.b) ** 2
+
+    if (distance < closestDistance) {
+      closestOption = option
+      closestDistance = distance
+    }
+  }
+
+  return closestOption?.value ?? fallback
+}
+
+function sanitizeShapeRecordColors(record) {
+  if (record?.typeName !== 'shape' || !record.props || typeof record.props !== 'object') {
+    return record
+  }
+
+  let nextProps = record.props
+  let didChange = false
+
+  if (typeof record.props.color === 'string') {
+    const resolvedColor = resolveTldrawColor(record.props.color, 'black')
+    if (resolvedColor !== record.props.color) {
+      nextProps = { ...nextProps, color: resolvedColor }
+      didChange = true
+    }
+  }
+
+  if (typeof record.props.labelColor === 'string') {
+    const fallbackLabelColor = typeof nextProps.color === 'string' ? nextProps.color : 'black'
+    const resolvedLabelColor = resolveTldrawColor(record.props.labelColor, fallbackLabelColor)
+    if (resolvedLabelColor !== record.props.labelColor) {
+      nextProps = { ...nextProps, labelColor: resolvedLabelColor }
+      didChange = true
+    }
+  }
+
+  return didChange ? { ...record, props: nextProps } : record
+}
+
+function sanitizeCanvasSnapshot(snapshot) {
+  if (!isCanvasSnapshot(snapshot)) return snapshot
+
+  let didChange = false
+  const nextStore = {}
+
+  for (const [id, record] of Object.entries(snapshot.store)) {
+    const nextRecord = sanitizeShapeRecordColors(record)
+    nextStore[id] = nextRecord
+    if (nextRecord !== record) {
+      didChange = true
+    }
+  }
+
+  return didChange ? { ...snapshot, store: nextStore } : snapshot
+}
+
+function normalizeCanvasSettings(settings) {
+  const source = settings && typeof settings === 'object' ? settings : {}
+  const backgroundColor =
+    typeof source.backgroundColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(source.backgroundColor)
+      ? source.backgroundColor
+      : DEFAULT_CANVAS_SETTINGS.backgroundColor
+  const annotationColor = ANNOTATION_COLOR_OPTIONS.some((option) => option.value === source.annotationColor)
+    ? source.annotationColor
+    : DEFAULT_CANVAS_SETTINGS.annotationColor
+
+  return {
+    ...DEFAULT_CANVAS_SETTINGS,
+    backgroundColor,
+    showGrid: Boolean(source.showGrid),
+    aiImageHolderWidth: clampNumber(
+      source.aiImageHolderWidth,
+      80,
+      2400,
+      DEFAULT_CANVAS_SETTINGS.aiImageHolderWidth
+    ),
+    aiImageHolderHeight: clampNumber(
+      source.aiImageHolderHeight,
+      80,
+      2400,
+      DEFAULT_CANVAS_SETTINGS.aiImageHolderHeight
+    ),
+    annotationColor
+  }
+}
+
+function getActiveCanvasSettings() {
+  return normalizeCanvasSettings(window.__cowartSettings)
+}
 
 function recordsAreEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
@@ -205,6 +381,7 @@ function getAspectIconStyle(preset) {
 
 function createAiImageHolderShape(editor, id, shapeOverrides = {}) {
   const scale = editor.getResizeScaleFactor()
+  const settings = getActiveCanvasSettings()
   const { meta, props, ...shapeRecordOverrides } = shapeOverrides
   const { scale: _scale, ...frameProps } = props ?? {}
 
@@ -217,8 +394,8 @@ function createAiImageHolderShape(editor, id, shapeOverrides = {}) {
       ...meta
     },
     props: {
-      w: AI_IMAGE_HOLDER_DEFAULT_W * scale,
-      h: AI_IMAGE_HOLDER_DEFAULT_H * scale,
+      w: settings.aiImageHolderWidth * scale,
+      h: settings.aiImageHolderHeight * scale,
       name: AI_IMAGE_HOLDER_LABEL,
       color: 'blue',
       ...frameProps
@@ -228,8 +405,9 @@ function createAiImageHolderShape(editor, id, shapeOverrides = {}) {
 
 function createAiImageHolderAtViewportCenter(editor) {
   const scale = editor.getResizeScaleFactor()
-  const w = AI_IMAGE_HOLDER_DEFAULT_W * scale
-  const h = AI_IMAGE_HOLDER_DEFAULT_H * scale
+  const settings = getActiveCanvasSettings()
+  const w = settings.aiImageHolderWidth * scale
+  const h = settings.aiImageHolderHeight * scale
   const center = editor.getViewportPageBounds().center
   const id = createShapeId()
 
@@ -370,7 +548,7 @@ function getDefaultAnnotationArrowBend(dx, dy, scale) {
 
 function getAnnotationColor(editor) {
   const color = editor.getStyleForNextShape(DefaultColorStyle)
-  return color === DefaultColorStyle.defaultValue ? ANNOTATION_DEFAULT_COLOR : color
+  return color === DefaultColorStyle.defaultValue ? getActiveCanvasSettings().annotationColor : color
 }
 
 class CowartAnnotationTool extends StateNode {
@@ -531,7 +709,7 @@ class CowartFrameShapeUtil extends FrameShapeUtil {
   }
 }
 
-const cowartShapeUtils = [CowartFrameShapeUtil]
+const cowartShapeUtils = [CowartFrameShapeUtil, CowartImageShapeUtil]
 
 const cowartUiOverrides = {
   translations: {
@@ -561,12 +739,13 @@ const cowartUiOverrides = {
         },
         onDragStart(source, info) {
           const scale = editor.getResizeScaleFactor()
+          const settings = getActiveCanvasSettings()
           onDragFromToolbarToCreateShape(editor, info, {
             createShape: (id) =>
               createAiImageHolderShape(editor, id, {
                 props: {
-                  w: AI_IMAGE_HOLDER_DEFAULT_W * scale,
-                  h: AI_IMAGE_HOLDER_DEFAULT_H * scale
+                  w: settings.aiImageHolderWidth * scale,
+                  h: settings.aiImageHolderHeight * scale
                 }
               }),
             onDragEnd: (id) => editor.select(id)
@@ -911,6 +1090,7 @@ function getCowartSelection(editor) {
       x: shape?.x ?? null,
       y: shape?.y ?? null,
       rotation: shape?.rotation ?? null,
+      opacity: shape?.opacity ?? null,
       meta: shape?.meta ?? null,
       isAiImageHolder: shape?.meta?.cowartAiImageHolder === true,
       props: shape?.props ?? null,
@@ -987,37 +1167,51 @@ function writeCowartSelectionState(selectionSnapshot) {
 export default function App() {
   const [snapshot, setSnapshot] = useState()
   const [viewState, setViewState] = useState()
+  const [settings, setSettings] = useState()
+  const [settingsSaveState, setSettingsSaveState] = useState('saved')
+  const [selectedShapes, setSelectedShapes] = useState([])
   const [loadError, setLoadError] = useState(null)
   const [skippedRecords, setSkippedRecords] = useState([])
+  const [editorInstance, setEditorInstance] = useState(null)
+  const didLoadSettingsRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
 
     async function loadCanvas() {
       try {
-        const [canvasResponse, viewStateResponse] = await Promise.all([
+        const [canvasResponse, viewStateResponse, settingsResponse] = await Promise.all([
           fetch(CANVAS_ENDPOINT, { signal: controller.signal }),
-          fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal })
+          fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal }),
+          fetch(SETTINGS_ENDPOINT, { signal: controller.signal })
         ])
         if (!canvasResponse.ok) {
-          throw new Error(`Failed to load canvas: ${canvasResponse.status} - ${canvasResponse.statusText}`)
+          throw new Error(`Failed to load canvas: ${canvasResponse.status}`)
         }
         if (!viewStateResponse.ok) {
-          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status} - ${viewStateResponse.statusText}`)
+          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status}`)
         }
-        const [canvasData, viewStateData] = await Promise.all([
+        if (!settingsResponse.ok) {
+          throw new Error(`Failed to load canvas settings: ${settingsResponse.status}`)
+        }
+        const [canvasData, viewStateData, settingsData] = await Promise.all([
           canvasResponse.json(),
-          viewStateResponse.json()
+          viewStateResponse.json(),
+          settingsResponse.json()
         ])
         const sanitized = sanitizeCanvasSnapshotForTldraw(canvasData.snapshot)
         setSnapshot(sanitized.snapshot)
         setSkippedRecords(sanitized.skippedRecords)
         setViewState(viewStateData.viewState ?? null)
+        setSettings(normalizeCanvasSettings(settingsData.settings))
+        didLoadSettingsRef.current = true
       } catch (error) {
         if (error.name === 'AbortError') return
         setLoadError(error)
         setSnapshot(null)
         setViewState(null)
+        setSettings(DEFAULT_CANVAS_SETTINGS)
+        didLoadSettingsRef.current = true
       }
     }
 
@@ -1026,10 +1220,60 @@ export default function App() {
     return () => controller.abort()
   }, [])
 
+  useEffect(() => {
+    window.__cowartSettings = settings
+  }, [settings])
+
+  useEffect(() => {
+    if (!settings) return
+    document.documentElement.style.setProperty('--cowart-canvas-background', settings.backgroundColor)
+  }, [settings])
+
+  useEffect(() => {
+    const editor = window.__cowartEditor
+    if (!settings || !editor) return
+    editor.updateInstanceState({ isGridMode: settings.showGrid })
+    editor.setStyleForNextShapes(DefaultColorStyle, settings.annotationColor)
+  }, [settings])
+
+  useEffect(() => {
+    if (!settings || !didLoadSettingsRef.current) return undefined
+
+    setSettingsSaveState('saving')
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(SETTINGS_ENDPOINT, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(settings),
+          signal: controller.signal
+        })
+        if (!response.ok) {
+          throw new Error(`Failed to save canvas settings: ${response.status}`)
+        }
+        setSettingsSaveState('saved')
+      } catch (error) {
+        if (error.name === 'AbortError') return
+        console.error(error)
+        setSettingsSaveState('error')
+      }
+    }, 350)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [settings])
+
   const handleMount = useCallback((editor) => {
     window.__cowartEditor = editor
     window.__cowartSelection = () => getCowartSelection(editor)
     window.__cowartViewState = () => getCowartViewState(editor)
+    setEditorInstance(editor)
+    setSelectedShapes(getCowartSelection(editor))
+    editor.updateInstanceState({ isGridMode: settings.showGrid })
+    editor.setStyleForNextShapes(DefaultColorStyle, settings.annotationColor)
     let lastSyncedSelectionState = ''
     let isSelectionStateSaving = false
     let hasPendingSelectionState = false
@@ -1043,6 +1287,7 @@ export default function App() {
 
     async function syncSelectionState() {
       const selectionSnapshot = getCowartSelectionSnapshot(editor)
+      setSelectedShapes(selectionSnapshot.selectedShapes)
       writeCowartSelectionState(selectionSnapshot)
 
       const selectionState = JSON.stringify(selectionSnapshot)
@@ -1137,7 +1382,7 @@ export default function App() {
 
       isSaving = true
       try {
-        const body = JSON.stringify(editor.store.getStoreSnapshot())
+        const body = JSON.stringify(sanitizeCanvasSnapshot(editor.store.getStoreSnapshot()))
         const response = await fetch(CANVAS_ENDPOINT, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
@@ -1292,6 +1537,8 @@ export default function App() {
       window.clearInterval(viewStateTimer)
       remoteLoadController?.abort()
       canvasEvents?.close()
+      setEditorInstance((current) => (current === editor ? null : current))
+      setSelectedShapes((current) => (window.__cowartEditor === editor ? [] : current))
       if (window.__cowartEditor === editor) {
         delete window.__cowartEditor
         delete window.__cowartSelection
@@ -1304,9 +1551,9 @@ export default function App() {
       syncViewState()
       saveCanvas()
     }
-  }, [viewState])
+  }, [settings, viewState])
 
-  if (snapshot === undefined || viewState === undefined) {
+  if (snapshot === undefined || viewState === undefined || settings === undefined) {
     return (
       <main className="cowart-status" aria-live="polite">
         Loading canvas...
@@ -1325,6 +1572,17 @@ export default function App() {
   return (
     <main className="cowart-canvas" aria-label="Cowart infinite canvas">
       <SkippedRecordsNotice records={skippedRecords} />
+      <CowartInspector
+        editor={editorInstance}
+        selectedShapes={selectedShapes}
+        settings={settings}
+        saveState={settingsSaveState}
+        annotationColorOptions={ANNOTATION_COLOR_OPTIONS}
+        onChangeSettings={(patch) =>
+          setSettings((current) => normalizeCanvasSettings({ ...current, ...patch }))
+        }
+        onResetSettings={() => setSettings(DEFAULT_CANVAS_SETTINGS)}
+      />
       <Tldraw
         snapshot={snapshot ?? undefined}
         inferDarkMode

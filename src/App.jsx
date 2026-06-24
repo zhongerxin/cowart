@@ -49,6 +49,7 @@ import annotationToolIconRaw from './assets/tool-comment.svg?raw'
 import CowartInspector from './components/CowartInspector.jsx'
 import { CowartImageShapeUtil } from './components/CowartImageShapeUtil.jsx'
 import { isCanvasSnapshot, sanitizeCanvasSnapshotForTldraw } from './canvasSnapshot.js'
+import { CowartNoteShapeUtil, CowartTextShapeUtil } from './components/CowartTextShapeUtils.jsx'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
@@ -709,7 +710,12 @@ class CowartFrameShapeUtil extends FrameShapeUtil {
   }
 }
 
-const cowartShapeUtils = [CowartFrameShapeUtil, CowartImageShapeUtil]
+const cowartShapeUtils = [
+  CowartFrameShapeUtil,
+  CowartImageShapeUtil,
+  CowartTextShapeUtil,
+  CowartNoteShapeUtil
+]
 
 const cowartUiOverrides = {
   translations: {

@@ -1,4 +1,10 @@
 import { useEffect, useState } from 'react'
+import {
+  COWART_TEXT_FONT_OPTIONS,
+  getCowartDefaultFontSize,
+  getCowartFontKey,
+  getCowartNearestSizeStyle
+} from './cowartTextStyles.js'
 
 const SHAPE_COLOR_OPTIONS = [
   { value: 'black', label: '黑色', swatch: '#1f2430' },
@@ -40,13 +46,6 @@ const SIZE_OPTIONS = [
   { value: 'xl', label: '特粗' }
 ]
 
-const FONT_OPTIONS = [
-  { value: 'draw', label: '手绘' },
-  { value: 'sans', label: '无衬线' },
-  { value: 'serif', label: '衬线' },
-  { value: 'mono', label: '等宽' }
-]
-
 const ALIGN_OPTIONS = [
   { value: 'start', label: '左对齐' },
   { value: 'middle', label: '居中' },
@@ -77,31 +76,9 @@ const VERTICAL_ALIGN_BUTTONS = [
   { value: 'end', label: '下' }
 ]
 
-const EXPORT_PRESET_OPTIONS = [
-  {
-    value: 'selection-png',
-    label: '选区 PNG',
-    format: 'png',
-    scale: 2,
-    background: false,
-    scope: 'selection'
-  },
-  {
-    value: 'selection-svg',
-    label: '选区 SVG',
-    format: 'svg',
-    scale: 1,
-    background: false,
-    scope: 'selection'
-  },
-  {
-    value: 'page-png',
-    label: '整页 PNG',
-    format: 'png',
-    scale: 2,
-    background: true,
-    scope: 'page'
-  }
+const EXPORT_SCOPE_OPTIONS = [
+  { value: 'selection', label: '选区' },
+  { value: 'page', label: '整页' }
 ]
 
 const EXPORT_FORMAT_OPTIONS = [
@@ -244,6 +221,7 @@ function getSelectionShapeIds(editor) {
 
 function getExportTargetShapeIds(editor, scope) {
   if (scope === 'page') return getCurrentPageShapeIds(editor)
+  if (scope === 'selection') return getSelectionShapeIds(editor)
 
   const selectedShapeIds = getSelectionShapeIds(editor)
   if (selectedShapeIds.length > 0) return selectedShapeIds
@@ -252,6 +230,10 @@ function getExportTargetShapeIds(editor, scope) {
 
 function getExportTargetLabel(editor, scope = 'auto') {
   const selectedShapeIds = getSelectionShapeIds(editor)
+  if (scope === 'selection') {
+    return selectedShapeIds.length === 1 ? '当前选中对象' : `当前选中 ${selectedShapeIds.length} 个对象`
+  }
+
   if (scope !== 'page' && selectedShapeIds.length > 0) {
     return selectedShapeIds.length === 1 ? '当前选中对象' : `当前选中 ${selectedShapeIds.length} 个对象`
   }
@@ -342,6 +324,10 @@ function shouldShowTextStyleSection(shape) {
   return shape?.type === 'text' || shape?.type === 'note'
 }
 
+function shouldHideStrokeSection(shape) {
+  return shape?.type === 'text' || shape?.type === 'note'
+}
+
 function getImageCornerRadiusValue(shape) {
   if (!supportsImageCornerRadius(shape)) return 0
   const width = Number(shape.props?.w) || 0
@@ -381,6 +367,61 @@ function getImageBlurValue(shape) {
 function getImageShadowColorValue(shape) {
   if (!supportsImageCornerRadius(shape)) return 'black'
   return resolveColorOptionValue(shape?.meta?.cowartImageShadowColor, SHAPE_COLOR_OPTIONS) ?? 'black'
+}
+
+function supportsTextColor(shape) {
+  if (shape?.type === 'text') return typeof shape?.props?.color === 'string'
+  return typeof shape?.props?.labelColor === 'string'
+}
+
+function getTextColorValue(shape) {
+  if (!supportsTextColor(shape)) return 'black'
+  if (shape?.type === 'text') {
+    return resolveColorOptionValue(shape?.props?.color, SHAPE_COLOR_OPTIONS) ?? 'black'
+  }
+  return resolveColorOptionValue(shape?.props?.labelColor, SHAPE_COLOR_OPTIONS) ?? 'black'
+}
+
+function getTextFontSizeValue(shape) {
+  const raw = Number(shape?.meta?.cowartTextFontSize)
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.min(Math.max(Math.round(raw), 8), 240)
+  }
+  return getCowartDefaultFontSize(shape)
+}
+
+function getTextFontFamilyValue(shape) {
+  return getCowartFontKey(shape)
+}
+
+function getTextWeightValue(shape) {
+  const weight = Number(shape?.meta?.cowartTextFontWeight ?? 400)
+  if (!Number.isFinite(weight)) return 400
+  return Math.min(Math.max(Math.round(weight), 100), 900)
+}
+
+function getTextLineHeightValue(shape) {
+  const value = Number(shape?.meta?.cowartTextLineHeight ?? 1.35)
+  if (!Number.isFinite(value)) return 1.35
+  return Math.min(Math.max(Math.round(value * 100) / 100, 0.8), 3)
+}
+
+function getTextLetterSpacingValue(shape) {
+  const value = Number(shape?.meta?.cowartTextLetterSpacing ?? 0)
+  if (!Number.isFinite(value)) return 0
+  return Math.min(Math.max(Math.round(value * 10) / 10, -8), 40)
+}
+
+function getTextUnderlineValue(shape) {
+  return shape?.meta?.cowartTextUnderline === true
+}
+
+function getTextStrikeValue(shape) {
+  return shape?.meta?.cowartTextStrike === true
+}
+
+function getTextItalicValue(shape) {
+  return shape?.meta?.cowartTextItalic === true
 }
 
 function ColorControl({ label, value, onChange, options = SHAPE_COLOR_OPTIONS }) {
@@ -812,12 +853,13 @@ function StyleSection({
   const canEditStrokeDash = supportsStrokeDash(shape)
   const canEditStrokeSize = supportsStrokeSize(shape)
   const canEditImageCornerRadius = supportsImageCornerRadius(shape)
+  const hideStrokeSection = shouldHideStrokeSection(shape)
   const canRenderOpacityRow = canEditOpacity && !canEditFill
   const canRenderSection =
     canEditFill ||
-    canEditStrokeDash ||
-    canEditStrokeSize ||
-    canEditStrokeColor ||
+    (!hideStrokeSection && canEditStrokeDash) ||
+    (!hideStrokeSection && canEditStrokeSize) ||
+    (!hideStrokeSection && canEditStrokeColor) ||
     canRenderOpacityRow ||
     canEditImageCornerRadius
 
@@ -1004,7 +1046,7 @@ function StyleSection({
         </div>
       )}
 
-      {(canEditStrokeDash || canEditStrokeSize || canEditStrokeColor) && (
+      {!hideStrokeSection && (canEditStrokeDash || canEditStrokeSize || canEditStrokeColor) && (
         <div className="cowart-property-row cowart-property-row-compact">
           <span className="cowart-property-label">描边</span>
 
@@ -1047,9 +1089,88 @@ function TextStyleSection({ shape, onChangeStyle }) {
   const canEditHorizontalAlign = supportsHorizontalAlign(shape)
   const canEditTextAlign = supportsTextAlign(shape)
   const canEditVerticalAlign = supportsVerticalAlign(shape)
-  const canEditLabelColor = supportsLabelColor(shape)
+  const canEditTextColor = supportsTextColor(shape)
+  const textColorValue = getTextColorValue(shape)
+  const textFontSizeValue = getTextFontSizeValue(shape)
+  const textFontFamilyValue = getTextFontFamilyValue(shape)
+  const textWeightValue = getTextWeightValue(shape)
+  const textLineHeightValue = getTextLineHeightValue(shape)
+  const textLetterSpacingValue = getTextLetterSpacingValue(shape)
+  const textUnderlineValue = getTextUnderlineValue(shape)
+  const textStrikeValue = getTextStrikeValue(shape)
+  const textItalicValue = getTextItalicValue(shape)
 
   if (!shouldRenderTextSection) return null
+
+  function updateTextMeta(partialMeta) {
+    window.__cowartEditor?.updateShapes?.([
+      {
+        id: shape.id,
+        type: shape.type,
+        meta: {
+          ...(shape.meta ?? {}),
+          ...partialMeta
+        }
+      }
+    ])
+  }
+
+  function handleChangeTextFontSize(nextFontSize) {
+    const roundedFontSize = clampNumber(nextFontSize, 8, 240, textFontSizeValue)
+    const nextSizeStyle = getCowartNearestSizeStyle(shape.type, roundedFontSize)
+
+    onChangeStyle({
+      size: nextSizeStyle,
+      ...(shape.type === 'note' ? { fontSizeAdjustment: 1 } : {})
+    })
+
+    updateTextMeta({ cowartTextFontSize: roundedFontSize })
+  }
+
+  function handleChangeTextFontFamily(nextFontFamily) {
+    const option = COWART_TEXT_FONT_OPTIONS.find((item) => item.value === nextFontFamily)
+    if (!option) return
+
+    onChangeStyle({
+      font: option.baseFont,
+      ...(shape.type === 'note' ? { fontSizeAdjustment: 1 } : {})
+    })
+
+    updateTextMeta({ cowartTextFontFamily: option.value })
+  }
+
+  function handleChangeTextColor(nextColor) {
+    if (shape.type === 'text') {
+      onChangeStyle({ color: nextColor })
+      return
+    }
+
+    onChangeStyle({ labelColor: nextColor })
+  }
+
+  function handleChangeTextAlign(nextAlign) {
+    if (shape.type === 'text' && shape.props.autoSize) {
+      const editor = window.__cowartEditor
+      if (editor) {
+        const bounds = editor.getShapeGeometry(shape).bounds
+        const nextWidth = Math.max(160, Math.ceil(bounds.width + 40))
+        editor.updateShapes([
+          {
+            id: shape.id,
+            type: shape.type,
+            props: {
+              textAlign: nextAlign,
+              autoSize: false,
+              w: nextWidth
+            }
+          }
+        ])
+        return
+      }
+    }
+
+    onChangeStyle({ textAlign: nextAlign })
+  }
 
   return (
     <section className="cowart-property-group cowart-property-group-text">
@@ -1059,18 +1180,129 @@ function TextStyleSection({ shape, onChangeStyle }) {
 
       {(canEditFont || canEditHorizontalAlign || canEditTextAlign || canEditVerticalAlign) && (
         <div className="cowart-text-control-stack">
-          {canEditFont && (
+          {canEditFont ? (
+            <div className="cowart-inline-control-row">
+              <label className="cowart-compact-select cowart-compact-select-surface">
+                <span>字体</span>
+                <select value={textFontFamilyValue} onChange={(event) => handleChangeTextFontFamily(event.target.value)}>
+                  {COWART_TEXT_FONT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="cowart-compact-select cowart-compact-select-surface">
+                <span>字号</span>
+                <div className="cowart-input-with-suffix">
+                  <input
+                    type="number"
+                    min="8"
+                    max="240"
+                    step="1"
+                    value={textFontSizeValue}
+                    onChange={(event) => handleChangeTextFontSize(event.target.value)}
+                  />
+                  <em>px</em>
+                </div>
+              </label>
+            </div>
+          ) : null}
+
+          <div className="cowart-inline-control-row">
             <label className="cowart-compact-select cowart-compact-select-surface">
-              <span>字体</span>
-              <select value={shape.props.font} onChange={(event) => onChangeStyle({ font: event.target.value })}>
-                {FONT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+              <span>字重</span>
+              <div className="cowart-input-with-suffix">
+                <input
+                  type="number"
+                  min="100"
+                  max="900"
+                  step="100"
+                  value={textWeightValue}
+                  onChange={(event) =>
+                    updateTextMeta({
+                      cowartTextFontWeight: clampNumber(event.target.value, 100, 900, textWeightValue)
+                    })
+                  }
+                />
+                <em>w</em>
+              </div>
+            </label>
+
+            <label className="cowart-compact-select cowart-compact-select-surface">
+              <span>行高</span>
+              <div className="cowart-input-with-suffix">
+                <input
+                  type="number"
+                  min="0.8"
+                  max="3"
+                  step="0.05"
+                  value={textLineHeightValue}
+                  onChange={(event) =>
+                    updateTextMeta({
+                      cowartTextLineHeight: Math.min(
+                        Math.max(Number(event.target.value) || textLineHeightValue, 0.8),
+                        3
+                      )
+                    })
+                  }
+                />
+                <em>x</em>
+              </div>
+            </label>
+          </div>
+
+          <div className="cowart-inline-control-row">
+            <label className="cowart-compact-select cowart-compact-select-surface">
+              <span>字间距</span>
+              <div className="cowart-input-with-suffix">
+                <input
+                  type="number"
+                  min="-8"
+                  max="40"
+                  step="0.5"
+                  value={textLetterSpacingValue}
+                  onChange={(event) =>
+                    updateTextMeta({
+                      cowartTextLetterSpacing: Math.min(
+                        Math.max(Number(event.target.value) || textLetterSpacingValue, -8),
+                        40
+                      )
+                    })
+                  }
+                />
+                <em>px</em>
+              </div>
+            </label>
+
+            <label className="cowart-compact-select cowart-compact-select-surface">
+              <span>样式</span>
+              <select
+                value={
+                  textUnderlineValue
+                    ? 'underline'
+                    : textStrikeValue
+                      ? 'strike'
+                      : textItalicValue
+                        ? 'italic'
+                        : 'normal'
+                }
+                onChange={(event) =>
+                  updateTextMeta({
+                    cowartTextItalic: event.target.value === 'italic',
+                    cowartTextUnderline: event.target.value === 'underline',
+                    cowartTextStrike: event.target.value === 'strike'
+                  })
+                }
+              >
+                <option value="normal">常规</option>
+                <option value="italic">斜体</option>
+                <option value="underline">下划线</option>
+                <option value="strike">删除线</option>
               </select>
             </label>
-          )}
+          </div>
 
           {(canEditHorizontalAlign || canEditTextAlign || canEditVerticalAlign) && (
             <div className="cowart-text-segment-grid">
@@ -1088,7 +1320,7 @@ function TextStyleSection({ shape, onChangeStyle }) {
                   label="文本"
                   value={shape.props.textAlign}
                   options={TEXT_ALIGN_BUTTONS}
-                  onChange={(textAlign) => onChangeStyle({ textAlign })}
+                  onChange={handleChangeTextAlign}
                 />
               )}
 
@@ -1105,11 +1337,11 @@ function TextStyleSection({ shape, onChangeStyle }) {
         </div>
       )}
 
-      {canEditLabelColor && (
+      {canEditTextColor && (
         <ColorControl
           label="文字颜色"
-          value={shape.props.labelColor}
-          onChange={(labelColor) => onChangeStyle({ labelColor })}
+          value={textColorValue}
+          onChange={handleChangeTextColor}
         />
       )}
 
@@ -1117,7 +1349,7 @@ function TextStyleSection({ shape, onChangeStyle }) {
         !canEditHorizontalAlign &&
         !canEditTextAlign &&
         !canEditVerticalAlign &&
-        !canEditLabelColor && (
+        !canEditTextColor && (
           <p className="cowart-section-empty">这个对象暂时没有可在右侧栏编辑的文字样式字段。</p>
         )}
     </section>
@@ -1203,7 +1435,7 @@ function CanvasSettingsSection({
         </div>
 
         <ColorControl
-          label="批注颜色"
+          label="颜色"
           value={currentColor.value}
           options={annotationColorOptions}
           onChange={(annotationColor) => onChangeSettings({ annotationColor })}
@@ -1218,18 +1450,20 @@ function CanvasSettingsSection({
 }
 
 function ExportSection({ editor }) {
+  const [scope, setScope] = useState('selection')
   const [format, setFormat] = useState('png')
   const [scale, setScale] = useState(2)
   const [includeBackground, setIncludeBackground] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState('')
+  const hasSelection = editor ? getSelectionShapeIds(editor).length > 0 : false
 
   async function runExport({ format: nextFormat, scale: nextScale, background, scope = 'auto' }) {
     if (!editor) return
 
     const shapeIds = getExportTargetShapeIds(editor, scope)
     if (shapeIds.length === 0) {
-      setExportMessage('当前页面没有可导出的内容。')
+      setExportMessage(scope === 'selection' ? '请先选择要导出的对象。' : '当前页面没有可导出的内容。')
       return
     }
 
@@ -1262,30 +1496,39 @@ function ExportSection({ editor }) {
 
   return (
     <section className="cowart-inspector-section cowart-inspector-section-compact" aria-label="导出">
-      <div className="cowart-style-stack">
-        <div className="cowart-property-group-header">
-          <h4>导出</h4>
-        </div>
-        <div className="cowart-preset-grid">
-          {EXPORT_PRESET_OPTIONS.map((preset) => (
-            <button
-              key={preset.value}
-              className="cowart-preset-button"
-              type="button"
-              disabled={!editor || (preset.scope === 'selection' && getSelectionShapeIds(editor).length === 0) || isExporting}
-              onClick={() => runExport(preset)}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
+      <div className="cowart-property-group-header">
+        <h4>导出</h4>
+      </div>
+
+      <div className="cowart-setting-row cowart-setting-row-surface">
+        <span>当前目标</span>
+        <strong>
+          {editor
+            ? scope === 'selection'
+              ? hasSelection
+                ? getExportTargetLabel(editor, 'selection')
+                : '未选择对象'
+              : getExportTargetLabel(editor, 'page')
+            : '画布未就绪'}
+        </strong>
       </div>
 
       <p className="cowart-section-note">
-        {editor ? `导出目标：${getExportTargetLabel(editor)}` : '画布加载后可导出当前选中对象或当前页面。'}
+        {editor ? '按范围、格式和倍率设置后直接导出。' : '画布加载后可导出选区或当前页面。'}
       </p>
 
       <div className="cowart-inline-control-row">
+        <label className="cowart-setting-stack">
+          <span>范围</span>
+          <select value={scope} onChange={(event) => setScope(event.target.value)}>
+            {EXPORT_SCOPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="cowart-setting-stack">
           <span>格式</span>
           <select value={format} onChange={(event) => setFormat(event.target.value)}>
@@ -1323,14 +1566,15 @@ function ExportSection({ editor }) {
         type="button"
         onClick={() =>
           runExport({
+            scope,
             format,
             scale,
             background: includeBackground
           })
         }
-        disabled={!editor || isExporting}
+        disabled={!editor || isExporting || (scope === 'selection' && !hasSelection)}
       >
-        {isExporting ? '导出中...' : '自定义导出'}
+        {isExporting ? '导出中...' : '导出'}
       </button>
 
       {exportMessage ? <p className="cowart-section-note">{exportMessage}</p> : null}

@@ -25,6 +25,7 @@ import {
   LineToolbarItem,
   NoteToolbarItem,
   OvalToolbarItem,
+  PageRecordType,
   RectangleToolbarItem,
   RhombusToolbarItem,
   SelectToolbarItem,
@@ -56,6 +57,10 @@ const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
 const SELECTION_ENDPOINT = '/api/selection'
 const VIEW_STATE_ENDPOINT = '/api/view-state'
+const SESSION_QUERY_PARAM = 'sessionId'
+const SESSION_PATH_PATTERN = /^\/sessionId=([^/]+)\/?$/
+const SESSION_PAGE_ID_PREFIX = 'cowart-session-'
+const SESSION_ID_MAX_LENGTH = 80
 const SELECTION_STATE_ELEMENT_ID = 'cowart-selection-state'
 const AI_IMAGE_TOOL_ID = 'ai-image'
 const AI_IMAGE_HOLDER_LABEL = 'AI 图片'
@@ -89,6 +94,97 @@ const annotationToolIcon = (
     dangerouslySetInnerHTML={{ __html: annotationToolIconSvg }}
   />
 )
+
+// 归一化 URL 或工具参数里的 sessionId，空值继续走旧的全局状态。
+function normalizeCowartSessionId(value) {
+  if (typeof value !== 'string') return null
+  const sessionId = value.trim()
+  return sessionId.length > 0 ? sessionId : null
+}
+
+// 兼容标准 query 写法和用户已经试过的 /sessionId=xxx 路径写法。
+function getCowartSessionIdFromLocation(location) {
+  const querySessionId = normalizeCowartSessionId(
+    new URLSearchParams(location.search).get(SESSION_QUERY_PARAM)
+  )
+  if (querySessionId) return querySessionId
+
+  const pathMatch = SESSION_PATH_PATTERN.exec(location.pathname)
+  if (!pathMatch) return null
+
+  try {
+    return normalizeCowartSessionId(decodeURIComponent(pathMatch[1]))
+  } catch {
+    return normalizeCowartSessionId(pathMatch[1])
+  }
+}
+
+// React 初始化时读取一次，避免渲染期间 URL 状态抖动。
+function getCowartSessionIdFromCurrentUrl() {
+  if (typeof window === 'undefined') return null
+  return getCowartSessionIdFromLocation(window.location)
+}
+
+// sessionId 会落到 tldraw page id 和本地目录名里，必须收敛到稳定安全的片段。
+function sanitizeCowartSessionId(sessionId) {
+  return (
+    String(sessionId || 'session')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, SESSION_ID_MAX_LENGTH) || 'session'
+  )
+}
+
+// 每个 Codex session 都有一个稳定首页 page，首次打开不会再抢默认 Page 1。
+function getCowartSessionPageId(sessionId) {
+  return PageRecordType.createId(`${SESSION_PAGE_ID_PREFIX}${sanitizeCowartSessionId(sessionId)}`)
+}
+
+// page 菜单里展示短名称，完整隔离依赖 page id 而不是展示名。
+function getCowartSessionPageName(sessionId) {
+  const label = String(sessionId || '').trim() || sanitizeCowartSessionId(sessionId)
+  return `Session ${label.slice(0, 48)}`
+}
+
+// 所有浏览器端 API 请求都显式携带 sessionId，让服务端选中对应状态文件。
+function getCowartApiEndpoint(endpoint, sessionId) {
+  if (!sessionId || typeof window === 'undefined') return endpoint
+  const url = new URL(endpoint, window.location.origin)
+  url.searchParams.set(SESSION_QUERY_PARAM, sessionId)
+  return `${url.pathname}${url.search}`
+}
+
+// 确保 session 首页存在；如果该 session 曾手动切过 page，则尊重已保存的 view state。
+function ensureCowartSessionPage(editor, sessionId, savedViewState) {
+  if (!sessionId) {
+    restoreCowartViewState(editor, savedViewState)
+    return false
+  }
+
+  const sessionPageId = getCowartSessionPageId(sessionId)
+  let didChangeDocument = false
+
+  if (!editor.getPage(sessionPageId)) {
+    editor.createPage({
+      id: sessionPageId,
+      name: getCowartSessionPageName(sessionId)
+    })
+    didChangeDocument = true
+  }
+
+  const savedPageId = savedViewState?.currentPageId
+  if (savedPageId && editor.getPage(savedPageId)) {
+    restoreCowartViewState(editor, savedViewState)
+    return didChangeDocument
+  }
+
+  if (editor.getCurrentPageId() !== sessionPageId) {
+    editor.setCurrentPage(sessionPageId)
+  }
+
+  return didChangeDocument
+}
 
 function recordsAreEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
@@ -985,10 +1081,15 @@ function writeCowartSelectionState(selectionSnapshot) {
 }
 
 export default function App() {
+  const [sessionId] = useState(() => getCowartSessionIdFromCurrentUrl())
   const [snapshot, setSnapshot] = useState()
   const [viewState, setViewState] = useState()
   const [loadError, setLoadError] = useState(null)
   const [skippedRecords, setSkippedRecords] = useState([])
+  const canvasEndpoint = getCowartApiEndpoint(CANVAS_ENDPOINT, sessionId)
+  const canvasEventsEndpoint = getCowartApiEndpoint(CANVAS_EVENTS_ENDPOINT, sessionId)
+  const selectionEndpoint = getCowartApiEndpoint(SELECTION_ENDPOINT, sessionId)
+  const viewStateEndpoint = getCowartApiEndpoint(VIEW_STATE_ENDPOINT, sessionId)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -996,8 +1097,8 @@ export default function App() {
     async function loadCanvas() {
       try {
         const [canvasResponse, viewStateResponse] = await Promise.all([
-          fetch(CANVAS_ENDPOINT, { signal: controller.signal }),
-          fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal })
+          fetch(canvasEndpoint, { signal: controller.signal }),
+          fetch(viewStateEndpoint, { signal: controller.signal })
         ])
         if (!canvasResponse.ok) {
           throw new Error(`Failed to load canvas: ${canvasResponse.status} - ${canvasResponse.statusText}`)
@@ -1024,22 +1125,20 @@ export default function App() {
     loadCanvas()
 
     return () => controller.abort()
-  }, [])
+  }, [canvasEndpoint, viewStateEndpoint])
 
   const handleMount = useCallback((editor) => {
     window.__cowartEditor = editor
     window.__cowartSelection = () => getCowartSelection(editor)
     window.__cowartViewState = () => getCowartViewState(editor)
+    window.__cowartSessionId = sessionId
+    window.__cowartSessionPageId = sessionId ? getCowartSessionPageId(sessionId) : null
     let lastSyncedSelectionState = ''
     let isSelectionStateSaving = false
     let hasPendingSelectionState = false
     let lastSyncedViewState = ''
     let isViewStateSaving = false
     let hasPendingViewState = false
-
-    editor.timers.requestAnimationFrame(() => {
-      restoreCowartViewState(editor, viewState)
-    })
 
     async function syncSelectionState() {
       const selectionSnapshot = getCowartSelectionSnapshot(editor)
@@ -1056,7 +1155,7 @@ export default function App() {
 
       isSelectionStateSaving = true
       try {
-        const response = await fetch(SELECTION_ENDPOINT, {
+        const response = await fetch(selectionEndpoint, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -1098,7 +1197,7 @@ export default function App() {
 
       isViewStateSaving = true
       try {
-        const response = await fetch(VIEW_STATE_ENDPOINT, {
+        const response = await fetch(viewStateEndpoint, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: nextViewState
@@ -1138,7 +1237,7 @@ export default function App() {
       isSaving = true
       try {
         const body = JSON.stringify(editor.store.getStoreSnapshot())
-        const response = await fetch(CANVAS_ENDPOINT, {
+        const response = await fetch(canvasEndpoint, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body
@@ -1164,6 +1263,12 @@ export default function App() {
       saveTimer = window.setTimeout(saveCanvas, 500)
     }
 
+    editor.timers.requestAnimationFrame(() => {
+      const didCreateSessionPage = ensureCowartSessionPage(editor, sessionId, viewState)
+      if (didCreateSessionPage) scheduleSave()
+      syncViewState()
+    })
+
     async function loadRemoteCanvasSnapshot() {
       remoteLoadController?.abort()
       const controller = new AbortController()
@@ -1173,7 +1278,7 @@ export default function App() {
       const preFetchStore = preserveLocalChanges ? null : editor.store.getStoreSnapshot().store
 
       try {
-        const response = await fetch(CANVAS_ENDPOINT, { signal: controller.signal })
+        const response = await fetch(canvasEndpoint, { signal: controller.signal })
         if (!response.ok) {
           throw new Error(`Failed to refresh canvas: ${response.status}`)
         }
@@ -1215,7 +1320,7 @@ export default function App() {
 
     let canvasEvents = null
     if ('EventSource' in window) {
-      canvasEvents = new EventSource(CANVAS_EVENTS_ENDPOINT)
+      canvasEvents = new EventSource(canvasEventsEndpoint)
       canvasEvents.addEventListener('canvas-changed', loadRemoteCanvasSnapshot)
       canvasEvents.onerror = (error) => {
         console.warn('Cowart canvas live refresh disconnected.', error)
@@ -1296,6 +1401,8 @@ export default function App() {
         delete window.__cowartEditor
         delete window.__cowartSelection
         delete window.__cowartViewState
+        delete window.__cowartSessionId
+        delete window.__cowartSessionPageId
       }
       document.getElementById(SELECTION_STATE_ELEMENT_ID)?.remove()
       unsubscribe()
@@ -1304,7 +1411,7 @@ export default function App() {
       syncViewState()
       saveCanvas()
     }
-  }, [viewState])
+  }, [canvasEndpoint, canvasEventsEndpoint, selectionEndpoint, sessionId, viewState, viewStateEndpoint])
 
   if (snapshot === undefined || viewState === undefined) {
     return (

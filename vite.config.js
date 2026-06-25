@@ -12,9 +12,13 @@ const selectionFile = join(canvasDir, 'cowart-selection.json')
 const viewStateFile = join(canvasDir, 'cowart-view-state.json')
 const canvasPagesDir = join(canvasDir, 'pages')
 const canvasAssetsDir = join(canvasDir, 'assets')
+const canvasSessionsDir = join(canvasDir, 'sessions')
 const pagesManifestFile = join(canvasPagesDir, 'manifest.json')
 const canvasFileName = 'cowart-canvas.json'
 const pageIdPrefix = 'page:'
+const sessionQueryParam = 'sessionId'
+const sessionPageIdPrefix = 'cowart-session-'
+const sessionIdMaxLength = 80
 const globalAssetsRoute = '/assets/'
 const pageAssetsRoute = '/page-assets/'
 const canvasEventClients = new Set()
@@ -112,6 +116,56 @@ function isViewState(value) {
     isFiniteNumber(value.camera.y) &&
     isFiniteNumber(value.camera.z)
   )
+}
+
+// 将请求里的 sessionId 收敛为空或稳定字符串，空值继续使用旧全局文件。
+function normalizeSessionId(value) {
+  if (typeof value !== 'string') return null
+  const sessionId = value.trim()
+  return sessionId.length > 0 ? sessionId : null
+}
+
+// sessionId 会进入本地路径和 page id，只保留稳定安全的字符。
+function sanitizeSessionId(sessionId) {
+  return (
+    String(sessionId || 'session')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, sessionIdMaxLength) || 'session'
+  )
+}
+
+// 从 API 请求 query 中取 sessionId；浏览器端会显式追加这个参数。
+function getRequestSessionId(req) {
+  const url = new URL(req.url, 'http://127.0.0.1')
+  return normalizeSessionId(url.searchParams.get(sessionQueryParam))
+}
+
+// 每个 session 的 selection/view-state 单独落盘，避免多个 Codex 会话互相覆盖。
+function sessionStateDir(sessionId) {
+  return join(canvasSessionsDir, sanitizeSessionId(sessionId))
+}
+
+function selectionFileForSession(sessionId) {
+  return sessionId ? join(sessionStateDir(sessionId), 'cowart-selection.json') : selectionFile
+}
+
+function viewStateFileForSession(sessionId) {
+  return sessionId ? join(sessionStateDir(sessionId), 'cowart-view-state.json') : viewStateFile
+}
+
+function sessionPageId(sessionId) {
+  return `${pageIdPrefix}${sessionPageIdPrefix}${sanitizeSessionId(sessionId)}`
+}
+
+function defaultViewState(sessionId) {
+  return {
+    version: 1,
+    currentPageId: sessionId ? sessionPageId(sessionId) : null,
+    camera: { x: 0, y: 0, z: 1 },
+    updatedAt: null
+  }
 }
 
 function isSafeChildPath(parent, child) {
@@ -486,17 +540,22 @@ function canvasStoragePlugin() {
 
       server.middlewares.use('/api/selection', async (req, res) => {
         try {
+          const sessionId = getRequestSessionId(req)
+          const stateFile = selectionFileForSession(sessionId)
+
           if (req.method === 'GET') {
             try {
               sendJson(res, 200, {
-                selection: await readJsonFile(selectionFile),
-                path: selectionFile
+                selection: await readJsonFile(stateFile),
+                path: stateFile,
+                sessionId
               })
             } catch (error) {
               if (error.code === 'ENOENT') {
                 sendJson(res, 200, {
                   selection: { selectedShapes: [], updatedAt: null },
-                  path: selectionFile
+                  path: stateFile,
+                  sessionId
                 })
                 return
               }
@@ -513,8 +572,8 @@ function canvasStoragePlugin() {
               return
             }
 
-            await writeJsonAtomic(selectionFile, selection)
-            sendJson(res, 200, { ok: true, path: selectionFile })
+            await writeJsonAtomic(stateFile, selection)
+            sendJson(res, 200, { ok: true, path: stateFile, sessionId })
             return
           }
 
@@ -528,22 +587,22 @@ function canvasStoragePlugin() {
 
       server.middlewares.use('/api/view-state', async (req, res) => {
         try {
+          const sessionId = getRequestSessionId(req)
+          const stateFile = viewStateFileForSession(sessionId)
+
           if (req.method === 'GET') {
             try {
               sendJson(res, 200, {
-                viewState: await readJsonFile(viewStateFile),
-                path: viewStateFile
+                viewState: await readJsonFile(stateFile),
+                path: stateFile,
+                sessionId
               })
             } catch (error) {
               if (error.code === 'ENOENT') {
                 sendJson(res, 200, {
-                  viewState: {
-                    version: 1,
-                    currentPageId: null,
-                    camera: { x: 0, y: 0, z: 1 },
-                    updatedAt: null
-                  },
-                  path: viewStateFile
+                  viewState: defaultViewState(sessionId),
+                  path: stateFile,
+                  sessionId
                 })
                 return
               }
@@ -560,8 +619,8 @@ function canvasStoragePlugin() {
               return
             }
 
-            await writeJsonAtomic(viewStateFile, viewState)
-            sendJson(res, 200, { ok: true, path: viewStateFile })
+            await writeJsonAtomic(stateFile, viewState)
+            sendJson(res, 200, { ok: true, path: stateFile, sessionId })
             return
           }
 

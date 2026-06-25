@@ -10,6 +10,9 @@ const TOOL_INSERT_IMAGE = "insert_cowart_image";
 const PAGE_ID_PREFIX = "page:";
 const PAGE_ASSETS_ROUTE = "/page-assets/";
 const CANVAS_FILE_NAME = "cowart-canvas.json";
+const SESSION_QUERY_PARAM = "sessionId";
+const SESSION_PAGE_ID_PREFIX = "cowart-session-";
+const SESSION_ID_MAX_LENGTH = 80;
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -36,6 +39,55 @@ function finiteNumber(value, fallback) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+// 统一处理工具参数里的 sessionId；空值保持旧的全局状态行为。
+function normalizeSessionId(value) {
+  if (typeof value !== "string") return null;
+  const sessionId = value.trim();
+  return sessionId.length > 0 ? sessionId : null;
+}
+
+// sessionId 会进入本地路径和 tldraw page id，只保留稳定安全的字符。
+function sanitizeSessionId(sessionId) {
+  return (
+    String(sessionId || "session")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, SESSION_ID_MAX_LENGTH) || "session"
+  );
+}
+
+// 兼容浏览器 URL: /?sessionId=xxx 和 /sessionId=xxx。
+function sessionIdFromCowartUrl(value) {
+  const rawUrl = nonEmptyString(value);
+  if (!rawUrl) return null;
+
+  try {
+    const url = new URL(rawUrl);
+    const querySessionId = normalizeSessionId(url.searchParams.get(SESSION_QUERY_PARAM));
+    if (querySessionId) return querySessionId;
+
+    const pathMatch = /^\/sessionId=([^/]+)\/?$/.exec(url.pathname);
+    if (!pathMatch) return null;
+
+    try {
+      return normalizeSessionId(decodeURIComponent(pathMatch[1]));
+    } catch {
+      return normalizeSessionId(pathMatch[1]);
+    }
+  } catch {
+    return null;
+  }
+}
+
+function resolveSessionId(args = {}) {
+  return normalizeSessionId(args.sessionId) || sessionIdFromCowartUrl(args.cowartUrl);
+}
+
+function sessionStateDir(canvasDir, sessionId) {
+  return join(canvasDir, "sessions", sanitizeSessionId(sessionId));
+}
+
 function resolveCanvasDir(args = {}) {
   const explicitCanvasDir = nonEmptyString(args.canvasDir);
   if (explicitCanvasDir) return pathResolve(explicitCanvasDir);
@@ -57,15 +109,23 @@ function pathResolve(value) {
 }
 
 function resolveSelectionFile(args = {}) {
-  return join(resolveCanvasDir(args), "cowart-selection.json");
+  const canvasDir = resolveCanvasDir(args);
+  const sessionId = resolveSessionId(args);
+  return sessionId ? join(sessionStateDir(canvasDir, sessionId), "cowart-selection.json") : join(canvasDir, "cowart-selection.json");
 }
 
 function resolveViewStateFile(args = {}) {
-  return join(resolveCanvasDir(args), "cowart-view-state.json");
+  const canvasDir = resolveCanvasDir(args);
+  const sessionId = resolveSessionId(args);
+  return sessionId ? join(sessionStateDir(canvasDir, sessionId), "cowart-view-state.json") : join(canvasDir, "cowart-view-state.json");
 }
 
 function pageDirName(pageId) {
   return encodeURIComponent(pageId.replace(PAGE_ID_PREFIX, ""));
+}
+
+function sessionPageId(sessionId) {
+  return `${PAGE_ID_PREFIX}${SESSION_PAGE_ID_PREFIX}${sanitizeSessionId(sessionId)}`;
 }
 
 function pageAssetUrl(pageId, fileName) {
@@ -179,7 +239,22 @@ async function readViewState(args) {
 
 function normalizeCowartUrl(args = {}) {
   const value = nonEmptyString(args.cowartUrl) || nonEmptyString(process.env.COWART_URL) || "http://127.0.0.1:43217";
-  return value.replace(/\/+$/, "");
+  try {
+    const url = new URL(value);
+    if (url.pathname === "/" || /^\/sessionId=([^/]+)\/?$/.test(url.pathname)) {
+      return url.origin;
+    }
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return value.replace(/\/+$/, "");
+  }
+}
+
+function cowartApiUrl(cowartUrl, args, apiPath) {
+  const url = new URL(apiPath, cowartUrl);
+  const sessionId = resolveSessionId(args);
+  if (sessionId) url.searchParams.set(SESSION_QUERY_PARAM, sessionId);
+  return url.toString();
 }
 
 async function fetchJson(url, options = {}) {
@@ -193,7 +268,7 @@ async function fetchJson(url, options = {}) {
 
 async function loadCanvasSnapshot(args) {
   const cowartUrl = normalizeCowartUrl(args);
-  const payload = await fetchJson(`${cowartUrl}/api/canvas`);
+  const payload = await fetchJson(cowartApiUrl(cowartUrl, args, "/api/canvas"));
   const snapshot = payload?.snapshot ?? payload;
   if (!snapshot || typeof snapshot !== "object" || !snapshot.schema || !snapshot.store) {
     throw new Error(`Expected Cowart canvas snapshot from ${cowartUrl}/api/canvas`);
@@ -201,8 +276,8 @@ async function loadCanvasSnapshot(args) {
   return { cowartUrl, snapshot, payload };
 }
 
-async function saveCanvasSnapshot(cowartUrl, snapshot) {
-  return fetchJson(`${cowartUrl}/api/canvas`, {
+async function saveCanvasSnapshot(cowartUrl, args, snapshot) {
+  return fetchJson(cowartApiUrl(cowartUrl, args, "/api/canvas"), {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(snapshot),
@@ -297,6 +372,35 @@ function chooseIndex(store, parentId) {
   return generateKeyBetween(siblingIndexes.at(-1) ?? null, null);
 }
 
+// 当 session page 尚未由浏览器保存时，MCP 可在已有快照里补建这个 page。
+function choosePageIndex(store) {
+  const pageIndexes = Object.values(store)
+    .filter((record) => record?.typeName === "page" && typeof record.index === "string")
+    .map((record) => record.index)
+    .sort();
+  return generateKeyBetween(pageIndexes.at(-1) ?? null, null);
+}
+
+function sessionPageName(sessionId) {
+  const label = String(sessionId || "").trim() || sanitizeSessionId(sessionId);
+  return `Session ${label.slice(0, 48)}`;
+}
+
+function ensureSessionPageRecord(store, sessionId) {
+  const pageId = sessionPageId(sessionId);
+  if (store[pageId]) return { pageId, didCreate: false };
+
+  store[pageId] = {
+    meta: {},
+    id: pageId,
+    name: sessionPageName(sessionId),
+    index: choosePageIndex(store),
+    typeName: "page",
+  };
+
+  return { pageId, didCreate: true };
+}
+
 function firstSelectedShapeId(selection) {
   return selection?.selectedShapes?.length === 1 ? selection.selectedShapes[0]?.id : null;
 }
@@ -372,13 +476,21 @@ async function insertCowartImage(args = {}) {
   const store = snapshot.store;
   const { selection } = await readSelectionState(args);
   const viewState = await readViewState(args);
+  const sessionId = resolveSessionId(args);
 
   const anchorShapeId = nonEmptyString(args.anchorShapeId) || nonEmptyString(args.sourceShapeId) || firstSelectedShapeId(selection);
   const anchorShape = anchorShapeId ? getRecord(store, anchorShapeId, "anchor shape") : null;
+  const explicitPageId = nonEmptyString(args.pageId);
+  const viewStatePageId = nonEmptyString(viewState?.currentPageId);
+  const sessionPageResult =
+    sessionId && !explicitPageId && !anchorShape && (!viewStatePageId || !store[viewStatePageId])
+      ? ensureSessionPageRecord(store, sessionId)
+      : null;
   const pageId =
-    nonEmptyString(args.pageId) ||
+    explicitPageId ||
     (anchorShape ? findPageIdForShape(store, anchorShape.id) : null) ||
-    nonEmptyString(viewState?.currentPageId) ||
+    (viewStatePageId && store[viewStatePageId] ? viewStatePageId : null) ||
+    sessionPageResult?.pageId ||
     Object.values(store).find((record) => record?.typeName === "page")?.id;
   if (!pageId || !store[pageId]) throw new Error("Could not determine target pageId.");
 
@@ -461,11 +573,13 @@ async function insertCowartImage(args = {}) {
     await copyFile(sourceImagePath, filePath);
     store[assetId] = assetRecord;
     store[shapeId] = shapeRecord;
-    await saveCanvasSnapshot(cowartUrl, snapshot);
+    await saveCanvasSnapshot(cowartUrl, args, snapshot);
   }
 
   return {
     cowartUrl,
+    sessionId,
+    sessionPageCreated: Boolean(sessionPageResult?.didCreate),
     pageId,
     parentId,
     anchorShapeId,
@@ -499,6 +613,14 @@ function toolDefinitions() {
             type: "string",
             description: "Absolute canvas directory. If provided, this takes precedence over projectDir.",
           },
+          sessionId: {
+            type: "string",
+            description: "Optional Codex/Cowart session id. Reads canvas/sessions/<sessionId>/cowart-selection.json when provided.",
+          },
+          cowartUrl: {
+            type: "string",
+            description: "Optional Cowart browser URL. A sessionId in the URL is used when the explicit sessionId field is absent.",
+          },
         },
         additionalProperties: false,
       },
@@ -521,6 +643,10 @@ function toolDefinitions() {
           projectDir: { type: "string", description: "Absolute Cowart project directory containing canvas/." },
           canvasDir: { type: "string", description: "Absolute canvas directory. Overrides projectDir." },
           cowartUrl: { type: "string", description: "Running Cowart URL, for example http://127.0.0.1:43218." },
+          sessionId: {
+            type: "string",
+            description: "Optional Codex/Cowart session id. Uses that session's selection and view-state, and falls back to that session's page.",
+          },
           pageId: { type: "string", description: "Target tldraw page id. Optional when an anchor or view-state page is available." },
           anchorShapeId: { type: "string", description: "Existing shape id to place beside, usually the source image or AI frame." },
           sourceShapeId: { type: "string", description: "Alias for anchorShapeId." },

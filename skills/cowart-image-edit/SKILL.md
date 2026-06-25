@@ -15,6 +15,13 @@ The Cowart service should be running for the active project, usually at:
 http://127.0.0.1:43217
 ```
 
+If the current Cowart browser URL contains `sessionId`, keep using that same
+session for all Cowart MCP or API calls. Prefer the query-string form:
+
+```text
+http://127.0.0.1:43217/?sessionId=<codex-thread-id>
+```
+
 The user is responsible for providing the relevant screenshot(s). Do not auto-capture the current canvas and do not scan the whole canvas to infer edit requests; a canvas may contain many images with different annotations.
 
 ## Workflow
@@ -118,6 +125,7 @@ The user is responsible for providing the relevant screenshot(s). Do not auto-ca
      "imagePath": "/absolute/path/to/annotation-edit-20260620-153012.png",
      "projectDir": "/absolute/path/to/user/codex-project",
      "cowartUrl": "http://127.0.0.1:43217",
+     "sessionId": "<codex-thread-id>",
      "anchorShapeId": "<selected source image or frame id>",
      "placement": "right",
      "margin": 40,
@@ -132,7 +140,9 @@ The user is responsible for providing the relevant screenshot(s). Do not auto-ca
    ```
 
    If the running Cowart service uses a Vite fallback port, pass the actual
-   browser URL such as `http://127.0.0.1:43218` as `cowartUrl`.
+   browser URL such as `http://127.0.0.1:43218` as `cowartUrl`. If the browser
+   URL has `sessionId`, pass that value separately as `sessionId` or keep it in
+   `cowartUrl`.
 
    The MCP tool must return the new `assetId`, `shapeId`, saved asset path,
    page id, bounds, and generated `index`. Confirm that the returned `index` is

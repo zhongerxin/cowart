@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --test --test-force-exit",
     "build": "vite build",
     "preview": "vite preview"
   },

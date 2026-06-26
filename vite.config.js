@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 const projectDir = resolve(process.env.COWART_PROJECT_DIR ?? process.cwd())
@@ -386,8 +386,28 @@ async function writeJsonAtomic(filePath, payload) {
   await rename(tempFile, filePath)
 }
 
+async function removeStalePageDirs(currentPageIds) {
+  let entries
+  try {
+    entries = await readdir(canvasPagesDir, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+
+  const currentDirNames = new Set([...currentPageIds].map(pageDirName))
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !currentDirNames.has(entry.name))
+      .map((entry) => rm(join(canvasPagesDir, entry.name), { recursive: true, force: true }))
+  )
+}
+
 async function saveCanvasSnapshot(snapshot) {
   const pages = getPageRecords(snapshot)
+  const currentPageIds = new Set(pages.map((page) => page.id))
+  await removeStalePageDirs(currentPageIds)
+
   if (pages.length === 0) {
     await writeJsonAtomic(canvasFile, snapshot)
     return { storage: 'legacy-single-file', paths: [canvasFile] }

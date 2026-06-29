@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "cowart:image-map": "node scripts/cowart-image-map.mjs",
+    "test:e2e:skills": "node scripts/e2e-skills.mjs",
+    "test:e2e:skills:computer-use:setup": "node scripts/e2e-skills.mjs --computer-use-setup",
+    "test": "node --test",
     "preview": "vite preview"
   },
   "dependencies": {

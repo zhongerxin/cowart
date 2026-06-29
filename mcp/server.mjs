@@ -1,7 +1,9 @@
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import readline from "node:readline";
 import { generateKeyBetween } from "fractional-indexing";
+import { COWART_IMAGE_MAP_META_KEY, normalizeImageMap } from "../src/imageMap.js";
 
 const SERVER_NAME = "Cowart MCP";
 const SERVER_VERSION = "0.1.1";
@@ -360,7 +362,7 @@ async function getImageDimensions(filePath) {
   throw new Error(`Could not read image dimensions for ${filePath}. Pass displayWidth/displayHeight and use a PNG/JPEG/WebP source.`);
 }
 
-async function insertCowartImage(args = {}) {
+export async function insertCowartImage(args = {}) {
   const imagePath = nonEmptyString(args.imagePath);
   if (!imagePath) throw new Error("imagePath is required.");
 
@@ -382,7 +384,14 @@ async function insertCowartImage(args = {}) {
     Object.values(store).find((record) => record?.typeName === "page")?.id;
   if (!pageId || !store[pageId]) throw new Error("Could not determine target pageId.");
 
-  const parentId = anchorShape?.parentId && store[anchorShape.parentId]?.typeName === "page" ? anchorShape.parentId : pageId;
+  const placement = ["right", "left", "below", "inside"].includes(args.placement) ? args.placement : "right";
+  const placeInsideAnchor = placement === "inside" && anchorShape;
+  const parentId =
+    placeInsideAnchor && anchorShape?.type === "frame"
+      ? anchorShape.id
+      : anchorShape?.parentId && store[anchorShape.parentId]?.typeName === "page"
+        ? anchorShape.parentId
+        : pageId;
   const imageSize = await getImageDimensions(sourceImagePath);
   const anchorBounds = anchorShape ? pageBoundsForShape(store, anchorShape) : null;
   const matchAnchor = args.matchAnchor !== false && anchorBounds;
@@ -392,8 +401,12 @@ async function insertCowartImage(args = {}) {
     matchAnchor ? anchorBounds.h : Math.round(width * (imageSize.height / imageSize.width))
   );
   const margin = Math.max(0, finiteNumber(args.margin, 40));
-  const placement = ["right", "left", "below"].includes(args.placement) ? args.placement : "right";
-  const bounds = choosePlacement({ store, pageId, parentId, anchorShape, width, height, margin, placement });
+  const bounds =
+    placeInsideAnchor && anchorShape?.type === "frame"
+      ? { x: 0, y: 0, w: width, h: height }
+      : placeInsideAnchor && anchorShape
+        ? { x: finiteNumber(anchorShape.x, 0), y: finiteNumber(anchorShape.y, 0), w: width, h: height }
+        : choosePlacement({ store, pageId, parentId, anchorShape, width, height, margin, placement });
 
   const canvasDir = resolveCanvasDir(args);
   const assetsDir = join(canvasDir, "pages", pageDirName(pageId), "assets");
@@ -406,6 +419,14 @@ async function insertCowartImage(args = {}) {
   const shapeId = uniqueRecordId(store, "shape", recordSeed);
   const index = chooseIndex(store, parentId);
   const mimeType = mimeTypeForFile(fileName);
+
+  const imageMap = normalizeImageMap(args.imageMap);
+  const assetMeta = args.assetMeta && typeof args.assetMeta === "object" ? { ...args.assetMeta } : {};
+  const shapeMeta = args.shapeMeta && typeof args.shapeMeta === "object" ? { ...args.shapeMeta } : {};
+  if (imageMap) {
+    assetMeta[COWART_IMAGE_MAP_META_KEY] = imageMap;
+    shapeMeta[COWART_IMAGE_MAP_META_KEY] = imageMap;
+  }
 
   const assetRecord = {
     id: assetId,
@@ -420,10 +441,9 @@ async function insertCowartImage(args = {}) {
       mimeType,
       isAnimated: false,
     },
-    meta: args.assetMeta && typeof args.assetMeta === "object" ? args.assetMeta : {},
+    meta: assetMeta,
   };
 
-  const shapeMeta = args.shapeMeta && typeof args.shapeMeta === "object" ? { ...args.shapeMeta } : {};
   if (anchorShapeId && !shapeMeta.cowartAnnotationSourceShapeId) {
     shapeMeta.cowartAnnotationSourceShapeId = anchorShapeId;
   }
@@ -477,6 +497,8 @@ async function insertCowartImage(args = {}) {
     assetUrl: assetRecord.props.src,
     imageSize,
     bounds,
+    imageMap,
+    imageMapRegionCount: imageMap?.regions?.length ?? 0,
     dryRun: Boolean(args.dryRun),
   };
 }
@@ -525,7 +547,7 @@ function toolDefinitions() {
           anchorShapeId: { type: "string", description: "Existing shape id to place beside, usually the source image or AI frame." },
           sourceShapeId: { type: "string", description: "Alias for anchorShapeId." },
           fileName: { type: "string", description: "Optional destination filename under the page assets folder." },
-          placement: { type: "string", enum: ["right", "left", "below"], description: "Placement direction from the anchor." },
+          placement: { type: "string", enum: ["right", "left", "below", "inside"], description: "Placement direction from the anchor." },
           margin: { type: "number", description: "Canvas units between the new image and nearby shapes. Defaults to 40." },
           matchAnchor: { type: "boolean", description: "Use the anchor display size when possible. Defaults to true." },
           displayWidth: { type: "number", description: "Displayed shape width in canvas units." },
@@ -534,6 +556,11 @@ function toolDefinitions() {
           annotationScreenshot: { type: "string", description: "Source annotation screenshot filename for metadata." },
           shapeMeta: { type: "object", description: "Additional tldraw shape metadata." },
           assetMeta: { type: "object", description: "Additional tldraw asset metadata." },
+          imageMap: {
+            type: "object",
+            description:
+              "Optional Cowart image map metadata. Must use version 1 and relative bbox values from 0..1.",
+          },
           dryRun: { type: "boolean", description: "Calculate insertion without copying or saving." },
         },
         required: ["imagePath"],
@@ -562,9 +589,13 @@ async function handleToolCall(id, params) {
               return `${shape.id} [${shape.type ?? "unknown"}]${assetName}`;
             })
             .join("\n");
+    const region = selection.selectedImageRegion;
+    const regionSummary = region
+      ? `\nSelected image region: ${region.regionId} on ${region.imageShapeId}`
+      : "";
 
     sendResult(id, {
-      content: [{ type: "text", text: summary }],
+      content: [{ type: "text", text: `${summary}${regionSummary}` }],
       structuredContent: { selection, selectionFile },
     });
     return;
@@ -628,24 +659,30 @@ async function handleRequest(message) {
   }
 }
 
-const lines = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
-
-lines.on("line", (line) => {
-  if (line.trim().length === 0) return;
-
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
-
-  handleRequest(message).catch((error) => {
-    if (message.id !== undefined) {
-      sendError(message.id, JsonRpcError.INVALID_PARAMS, error instanceof Error ? error.message : String(error));
-    }
+export function startMcpServer() {
+  const lines = readline.createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
   });
-});
+
+  lines.on("line", (line) => {
+    if (line.trim().length === 0) return;
+
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+
+    handleRequest(message).catch((error) => {
+      if (message.id !== undefined) {
+        sendError(message.id, JsonRpcError.INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+      }
+    });
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startMcpServer();
+}

@@ -9,6 +9,7 @@ Cowart is a local infinite-canvas plugin for Codex. It brings a tldraw-powered c
 - Open a local tldraw infinite canvas from Codex.
 - Persist canvas pages and image assets in the active project directory.
 - Create AI image holders on the canvas and ask Codex to generate images into the selected holder.
+- Attach hover-selectable semantic bbox regions to generated images so text, modules, and internal objects can be selected like DevTools targets.
 - Provide Cowart annotation screenshots and let Codex generate clean revised images beside the original.
 - Use Cowart MCP tools to read selection state, insert images, and save page-local assets.
 
@@ -109,6 +110,10 @@ Generate a new image into the selected Cowart AI image holder.
 
 Codex reads the selected holder, matches its aspect ratio, generates the image, and inserts it into the holder.
 
+Generated images can include semantic region overlays. This video shows hover highlighting, click-to-select image regions, and right-click or double-click quick annotations:
+
+https://github.com/user-attachments/assets/823c5ac7-bffe-4eb5-89f7-8afa445c38b0
+
 ![Generate and insert a new image with Cowart](assets/generate-image.png)
 
 ### Generate From An Annotation Screenshot
@@ -137,6 +142,7 @@ Codex reads the notes and arrows in the screenshot, generates a clean revised im
 npm install
 npm run dev
 npm run build
+npm run test:e2e:skills
 ```
 
 You can also start the canvas service directly and pass the active user project directory:

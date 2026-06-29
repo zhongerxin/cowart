@@ -103,6 +103,81 @@ body {
   border-radius: 1px;
 }
 
+.cowart-image-region-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.cowart-image-region-overlay {
+  position: absolute;
+  display: block;
+  padding: 0;
+  color: #174ea6;
+  appearance: none;
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: crosshair;
+}
+
+.cowart-image-region-overlay-shape {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.cowart-image-region-overlay-shape polygon {
+  fill: rgb(47 128 237 / 0%);
+  stroke: rgb(47 128 237 / 0%);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  transition:
+    fill 120ms ease,
+    stroke 120ms ease;
+}
+
+.cowart-image-region-overlay[data-state="hovered"] .cowart-image-region-overlay-shape polygon,
+.cowart-image-region-overlay[data-state="selected"] .cowart-image-region-overlay-shape polygon {
+  fill: rgb(47 128 237 / 12%);
+  stroke: rgb(47 128 237 / 88%);
+}
+
+.cowart-image-region-overlay[data-state="selected"] .cowart-image-region-overlay-shape polygon {
+  fill: rgb(47 128 237 / 18%);
+  stroke: #174ea6;
+}
+
+.cowart-image-region-overlay-label {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 4px);
+  display: none;
+  max-width: min(220px, 42vw);
+  padding: 4px 6px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #174ea6;
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgb(31 41 55 / 18%);
+}
+
+.cowart-image-region-overlay[data-state="hovered"] .cowart-image-region-overlay-label,
+.cowart-image-region-overlay[data-state="selected"] .cowart-image-region-overlay-label {
+  display: block;
+}
+
 .tlui-button__tool.cowart-annotation-toolbar-button {
   display: inline-flex;
   width: auto;

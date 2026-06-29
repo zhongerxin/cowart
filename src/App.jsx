@@ -44,9 +44,12 @@ import {
 } from 'tldraw'
 import { AllSelection } from '@tiptap/pm/state'
 import 'tldraw/tldraw.css'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import annotationToolIconRaw from './assets/tool-comment.svg?raw'
 import {
+  findCowartImageMapRegion,
+  getCowartImageMapFromRecords,
+} from './imageMap.js'
   describeSkippedRecord,
   isCanvasSnapshot,
   sanitizeCanvasSnapshotForTldraw
@@ -82,6 +85,9 @@ const ANNOTATION_MAX_BEND = 48
 const ANNOTATION_LABEL_POSITION = 0
 const ANNOTATION_SELECT_TEXT_MAX_ATTEMPTS = 8
 const ANNOTATION_SELECT_TEXT_SETTLE_ATTEMPTS = 4
+const IMAGE_REGION_OVERLAY_MIN_SIZE = 8
+const QUICK_ANNOTATION_OFFSET_X = 32
+const QUICK_ANNOTATION_OFFSET_Y = 40
 const annotationToolIconSvg = annotationToolIconRaw.replaceAll('black', 'currentColor')
 const annotationToolIcon = (
   <div
@@ -595,7 +601,8 @@ const cowartUiOverrides = {
 
 const cowartComponents = {
   Toolbar: CowartToolbar,
-  StylePanel: CowartStylePanel
+  StylePanel: CowartStylePanel,
+  InFrontOfTheCanvas: CowartImageRegionOverlay
 }
 
 function CowartStylePanel(props) {
@@ -899,11 +906,234 @@ function CowartToolbar(props) {
   )
 }
 
+function getRegionViewportOverlay(editor, imageShape, asset) {
+  const imageMap = getCowartImageMapFromRecords(imageShape, asset)
+  if (!imageMap?.regions?.length) return []
+
+  const width = Number(imageShape.props?.w)
+  const height = Number(imageShape.props?.h)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return []
+  }
+
+  const transform = editor.getShapePageTransform(imageShape.id)
+  const selectedShapeIds = new Set(editor.getSelectedShapeIds())
+  return imageMap.regions
+    .map((region) => {
+      const { x, y, w, h } = region.bbox
+      const localPoints = [
+        { x: x * width, y: y * height },
+        { x: (x + w) * width, y: y * height },
+        { x: (x + w) * width, y: (y + h) * height },
+        { x: x * width, y: (y + h) * height }
+      ]
+      const pagePoints = localPoints.map((point) => transform.applyToPoint(point))
+      const viewportPoints = pagePoints.map((point) => editor.pageToViewport(point))
+      if (!viewportPoints.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))) {
+        return null
+      }
+
+      const xs = viewportPoints.map((point) => point.x)
+      const ys = viewportPoints.map((point) => point.y)
+      const left = Math.min(...xs)
+      const top = Math.min(...ys)
+      const right = Math.max(...xs)
+      const bottom = Math.max(...ys)
+      const overlayWidth = right - left
+      const overlayHeight = bottom - top
+      if (overlayWidth < IMAGE_REGION_OVERLAY_MIN_SIZE || overlayHeight < IMAGE_REGION_OVERLAY_MIN_SIZE) {
+        return null
+      }
+
+      return {
+        key: `${imageShape.id}:${region.id}`,
+        imageShapeId: imageShape.id,
+        assetId: imageShape.props?.assetId ?? null,
+        region,
+        pagePoints,
+        isImageSelected: selectedShapeIds.has(imageShape.id),
+        style: {
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${overlayWidth}px`,
+          height: `${overlayHeight}px`
+        },
+        polygonPoints: viewportPoints
+          .map((point) => `${point.x - left},${point.y - top}`)
+          .join(' ')
+      }
+    })
+    .filter(Boolean)
+}
+
+function getBoundsFromPoints(points) {
+  const xs = points.map((point) => point.x)
+  const ys = points.map((point) => point.y)
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  const maxX = Math.max(...xs)
+  const maxY = Math.max(...ys)
+
+  return {
+    x,
+    y,
+    w: maxX - x,
+    h: maxY - y,
+    center: {
+      x: x + (maxX - x) / 2,
+      y: y + (maxY - y) / 2
+    }
+  }
+}
+
+function getQuickAnnotationLabel(region) {
+  return region.text ? `${region.label}: ${region.text}` : region.label
+}
+
+function createQuickAnnotationForRegion(editor, regionOverlay) {
+  const bounds = getBoundsFromPoints(regionOverlay.pagePoints)
+  const scale = editor.getResizeScaleFactor()
+  const color = getAnnotationColor(editor)
+  const arrowId = createShapeId()
+  const start = {
+    x: bounds.x + bounds.w + QUICK_ANNOTATION_OFFSET_X * scale,
+    y: bounds.y - QUICK_ANNOTATION_OFFSET_Y * scale
+  }
+  const end = bounds.center
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+
+  editor.markHistoryStoppingPoint(`quick_annotation:${regionOverlay.region.id}`)
+  editor.createShape({
+    id: arrowId,
+    type: 'arrow',
+    x: start.x,
+    y: start.y,
+    meta: {
+      cowartAnnotationArrow: true,
+      cowartQuickAnnotation: true,
+      cowartImageRegionSource: {
+        imageShapeId: regionOverlay.imageShapeId,
+        assetId: regionOverlay.assetId,
+        regionId: regionOverlay.region.id
+      }
+    },
+    props: {
+      kind: 'arc',
+      dash: 'draw',
+      size: 'm',
+      fill: 'none',
+      color,
+      labelColor: color,
+      bend: getDefaultAnnotationArrowBend(dx, dy, scale),
+      start: { x: 0, y: 0 },
+      end: { x: dx, y: dy },
+      arrowheadStart: 'none',
+      arrowheadEnd: 'arrow',
+      richText: toRichText(getQuickAnnotationLabel(regionOverlay.region)),
+      labelPosition: ANNOTATION_LABEL_POSITION,
+      font: 'draw',
+      scale
+    }
+  })
+
+  startEditingAnnotationArrowLabel(editor, arrowId)
+}
+
+function CowartImageRegionOverlay() {
+  const editor = useEditor()
+  const [hoveredRegionKey, setHoveredRegionKey] = useState(null)
+  const [selectedRegionKey, setSelectedRegionKey] = useState(null)
+  const regions = useValue(
+    'cowart image region overlays',
+    () => {
+      editor.getCamera()
+      return editor
+        .getCurrentPageShapes()
+        .filter((shape) => shape.type === 'image')
+        .flatMap((shape) => {
+          const asset = shape.props?.assetId ? editor.getAsset(shape.props.assetId) : null
+          return getRegionViewportOverlay(editor, shape, asset)
+        })
+    },
+    [editor]
+  )
+
+  if (regions.length === 0) return null
+
+  return (
+    <div className="cowart-image-region-overlay-layer">
+      {regions.map((regionOverlay) => {
+        const isActive =
+          regionOverlay.key === selectedRegionKey && regionOverlay.isImageSelected
+        const isHovered = regionOverlay.key === hoveredRegionKey
+        const label = regionOverlay.region.text
+          ? `${regionOverlay.region.label}: ${regionOverlay.region.text}`
+          : regionOverlay.region.label
+
+        return (
+          <button
+            key={regionOverlay.key}
+            aria-label={`选择图片区域 ${label}，右键或双击添加标注`}
+            className="cowart-image-region-overlay"
+            data-cowart-image-region-id={regionOverlay.region.id}
+            data-cowart-image-shape-id={regionOverlay.imageShapeId}
+            data-state={isActive ? 'selected' : isHovered ? 'hovered' : 'idle'}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              editor.select(regionOverlay.imageShapeId)
+              setSelectedRegionKey(regionOverlay.key)
+              window.__cowartSelectImageRegion?.({
+                imageShapeId: regionOverlay.imageShapeId,
+                assetId: regionOverlay.assetId,
+                regionId: regionOverlay.region.id,
+                region: regionOverlay.region,
+                selectedAt: new Date().toISOString()
+              })
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              createQuickAnnotationForRegion(editor, regionOverlay)
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              createQuickAnnotationForRegion(editor, regionOverlay)
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+            }}
+            onPointerEnter={() => setHoveredRegionKey(regionOverlay.key)}
+            onPointerLeave={() => setHoveredRegionKey((key) => (key === regionOverlay.key ? null : key))}
+            style={regionOverlay.style}
+            title={label}
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              className="cowart-image-region-overlay-shape"
+              preserveAspectRatio="none"
+              viewBox={`0 0 ${parseFloat(regionOverlay.style.width)} ${parseFloat(regionOverlay.style.height)}`}
+            >
+              <polygon points={regionOverlay.polygonPoints} />
+            </svg>
+            <span className="cowart-image-region-overlay-label">{label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function getCowartSelection(editor) {
   const selectedShapeIds = editor.getSelectedShapeIds()
   return selectedShapeIds.map((id) => {
     const shape = editor.getShape(id)
     const asset = shape?.props?.assetId ? editor.getAsset(shape.props.assetId) : null
+    const imageMap = shape?.type === 'image' ? getCowartImageMapFromRecords(shape, asset) : null
     return {
       id,
       type: shape?.type ?? null,
@@ -925,14 +1155,49 @@ function getCowartSelection(editor) {
             mimeType: asset.props?.mimeType ?? null,
             fileSize: asset.props?.fileSize ?? null
           }
+        : null,
+      imageMap: imageMap
+        ? {
+            version: imageMap.version,
+            regionCount: imageMap.regions.length
+          }
         : null
     }
   })
 }
 
-function getCowartSelectionSnapshot(editor) {
+function getValidSelectedImageRegion(editor, selectedShapes, selectedImageRegion) {
+  if (!selectedImageRegion || typeof selectedImageRegion !== 'object') return null
+  if (!selectedShapes.some((shape) => shape.id === selectedImageRegion.imageShapeId)) return null
+
+  const imageShape = editor.getShape(selectedImageRegion.imageShapeId)
+  if (!imageShape || imageShape.type !== 'image') return null
+
+  const asset = imageShape.props?.assetId ? editor.getAsset(imageShape.props.assetId) : null
+  const imageMap = getCowartImageMapFromRecords(imageShape, asset)
+  const region = findCowartImageMapRegion(imageMap, selectedImageRegion.regionId)
+  if (!region) return null
+
   return {
-    selectedShapes: getCowartSelection(editor)
+    imageShapeId: imageShape.id,
+    assetId: imageShape.props?.assetId ?? selectedImageRegion.assetId ?? null,
+    regionId: region.id,
+    region,
+    selectedAt: selectedImageRegion.selectedAt ?? new Date().toISOString()
+  }
+}
+
+function getCowartSelectionSnapshot(editor, selectedImageRegion = null) {
+  const selectedShapes = getCowartSelection(editor)
+  const validSelectedImageRegion = getValidSelectedImageRegion(
+    editor,
+    selectedShapes,
+    selectedImageRegion
+  )
+
+  return {
+    selectedShapes,
+    selectedImageRegion: validSelectedImageRegion
   }
 }
 
@@ -989,6 +1254,8 @@ export default function App() {
   const [viewState, setViewState] = useState()
   const [loadError, setLoadError] = useState(null)
   const [skippedRecords, setSkippedRecords] = useState([])
+  const selectedImageRegionRef = useRef(null)
+  const syncSelectionStateRef = useRef(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -1028,8 +1295,13 @@ export default function App() {
 
   const handleMount = useCallback((editor) => {
     window.__cowartEditor = editor
-    window.__cowartSelection = () => getCowartSelection(editor)
+    window.__cowartSelection = () =>
+      getCowartSelectionSnapshot(editor, selectedImageRegionRef.current)
     window.__cowartViewState = () => getCowartViewState(editor)
+    window.__cowartSelectImageRegion = (selectedImageRegion) => {
+      selectedImageRegionRef.current = selectedImageRegion
+      syncSelectionStateRef.current?.()
+    }
     let lastSyncedSelectionState = ''
     let isSelectionStateSaving = false
     let hasPendingSelectionState = false
@@ -1042,7 +1314,13 @@ export default function App() {
     })
 
     async function syncSelectionState() {
-      const selectionSnapshot = getCowartSelectionSnapshot(editor)
+      const selectionSnapshot = getCowartSelectionSnapshot(
+        editor,
+        selectedImageRegionRef.current
+      )
+      if (!selectionSnapshot.selectedImageRegion && selectedImageRegionRef.current) {
+        selectedImageRegionRef.current = null
+      }
       writeCowartSelectionState(selectionSnapshot)
 
       const selectionState = JSON.stringify(selectionSnapshot)
@@ -1078,6 +1356,7 @@ export default function App() {
       }
     }
 
+    syncSelectionStateRef.current = syncSelectionState
     syncSelectionState()
     const selectionStateTimer = window.setInterval(syncSelectionState, 250)
 
@@ -1296,6 +1575,10 @@ export default function App() {
         delete window.__cowartEditor
         delete window.__cowartSelection
         delete window.__cowartViewState
+        delete window.__cowartSelectImageRegion
+      }
+      if (syncSelectionStateRef.current === syncSelectionState) {
+        syncSelectionStateRef.current = null
       }
       document.getElementById(SELECTION_STATE_ELEMENT_ID)?.remove()
       unsubscribe()

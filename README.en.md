@@ -163,6 +163,6 @@ ZHONG XIN
 zhongxin123456@gmail.com  
 https://www.jiqiren.ai
 
-## Acknowledgements
+## Acknowledgments
 
 Cowart's canvas experience is built on top of [tldraw/tldraw](https://github.com/tldraw/tldraw).

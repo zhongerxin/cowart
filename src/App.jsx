@@ -35,7 +35,6 @@ import {
   TldrawUiMenuToolItem,
   TriangleToolbarItem,
   XBoxToolbarItem,
-  createTLStore,
   createShapeId,
   onDragFromToolbarToCreateShape,
   startEditingShapeWithRichText,
@@ -51,6 +50,10 @@ import {
   findCowartImageMapRegion,
   getCowartImageMapFromRecords,
 } from './imageMap.js'
+  describeSkippedRecord,
+  isCanvasSnapshot,
+  sanitizeCanvasSnapshotForTldraw
+} from './canvasSnapshot.js'
 
 const CANVAS_ENDPOINT = '/api/canvas'
 const CANVAS_EVENTS_ENDPOINT = '/api/canvas-events'
@@ -92,105 +95,6 @@ const annotationToolIcon = (
     dangerouslySetInnerHTML={{ __html: annotationToolIconSvg }}
   />
 )
-
-function isCanvasSnapshot(value) {
-  return value && typeof value === 'object' && value.store && value.schema
-}
-
-function firstErrorLine(error) {
-  return error instanceof Error ? error.message.split('\n')[0] : String(error).split('\n')[0]
-}
-
-function describeSkippedRecord(record, reason) {
-  return {
-    id: typeof record?.id === 'string' ? record.id : '(missing id)',
-    typeName: typeof record?.typeName === 'string' ? record.typeName : '(missing typeName)',
-    type: typeof record?.type === 'string' ? record.type : null,
-    reason: firstErrorLine(reason)
-  }
-}
-
-function getRecordDependencies(record) {
-  const dependencies = []
-  if (record?.typeName === 'shape') {
-    if (typeof record.parentId === 'string') dependencies.push(record.parentId)
-    if (record.type === 'image' && typeof record.props?.assetId === 'string') {
-      dependencies.push(record.props.assetId)
-    }
-  }
-  if (record?.typeName === 'binding') {
-    const fromId = record.fromId ?? record.props?.fromId
-    const toId = record.toId ?? record.props?.toId
-    if (typeof fromId === 'string') dependencies.push(fromId)
-    if (typeof toId === 'string') dependencies.push(toId)
-  }
-  return dependencies
-}
-
-function pruneRecordsWithMissingDependencies(store, skippedRecords) {
-  const prunedStore = { ...store }
-  let changed = true
-
-  while (changed) {
-    changed = false
-    for (const record of Object.values(prunedStore)) {
-      const missingDependency = getRecordDependencies(record).find((id) => !prunedStore[id])
-      if (!missingDependency) continue
-
-      delete prunedStore[record.id]
-      skippedRecords.push(
-        describeSkippedRecord(record, `Missing dependent record: ${missingDependency}`)
-      )
-      changed = true
-    }
-  }
-
-  return prunedStore
-}
-
-function sanitizeCanvasSnapshotForTldraw(snapshot) {
-  if (!isCanvasSnapshot(snapshot)) {
-    return { snapshot: null, skippedRecords: [] }
-  }
-
-  const validationStore = createTLStore()
-  const skippedRecords = []
-  let migratedSnapshot
-
-  try {
-    migratedSnapshot = validationStore.migrateSnapshot(snapshot)
-  } catch (error) {
-    return {
-      snapshot: null,
-      skippedRecords: [
-        {
-          id: '(snapshot)',
-          typeName: 'snapshot',
-          type: null,
-          reason: firstErrorLine(error)
-        }
-      ]
-    }
-  }
-
-  const validStore = {}
-  for (const record of Object.values(migratedSnapshot.store)) {
-    try {
-      validationStore.put([record], 'initialize')
-      validStore[record.id] = validationStore.get(record.id)
-    } catch (error) {
-      skippedRecords.push(describeSkippedRecord(record, error))
-    }
-  }
-
-  return {
-    snapshot: {
-      schema: migratedSnapshot.schema,
-      store: pruneRecordsWithMissingDependencies(validStore, skippedRecords)
-    },
-    skippedRecords
-  }
-}
 
 function recordsAreEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
@@ -1363,10 +1267,10 @@ export default function App() {
           fetch(VIEW_STATE_ENDPOINT, { signal: controller.signal })
         ])
         if (!canvasResponse.ok) {
-          throw new Error(`Failed to load canvas: ${canvasResponse.status}`)
+          throw new Error(`Failed to load canvas: ${canvasResponse.status} - ${canvasResponse.statusText}`)
         }
         if (!viewStateResponse.ok) {
-          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status}`)
+          throw new Error(`Failed to load canvas view state: ${viewStateResponse.status} - ${viewStateResponse.statusText}`)
         }
         const [canvasData, viewStateData] = await Promise.all([
           canvasResponse.json(),

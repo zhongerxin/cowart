@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 const projectDir = resolve(process.env.COWART_PROJECT_DIR ?? process.cwd())
@@ -18,6 +19,7 @@ const globalAssetsRoute = '/assets/'
 const pageAssetsRoute = '/page-assets/'
 const canvasEventClients = new Set()
 let canvasEventVersion = 0
+let canvasSnapshotSanitizerPromise = null
 
 const mimeTypes = new Map([
   ['.apng', 'image/apng'],
@@ -80,8 +82,14 @@ function readRequestBody(req) {
   })
 }
 
-function isSnapshot(value) {
+function isCanvasSnapshot(value) {
   return value && typeof value === 'object' && value.store && value.schema
+}
+
+async function sanitizeCanvasSnapshotForServer(snapshot) {
+  canvasSnapshotSanitizerPromise ??= import('./src/canvasSnapshot.js')
+  const { sanitizeCanvasSnapshotForTldraw } = await canvasSnapshotSanitizerPromise
+  return sanitizeCanvasSnapshotForTldraw(snapshot)
 }
 
 function isSelectionState(value) {
@@ -330,7 +338,7 @@ async function readPageSnapshots() {
     const filePath = join(canvasPagesDir, entry.name, canvasFileName)
     try {
       const snapshot = await readJsonFile(filePath)
-      if (isSnapshot(snapshot)) snapshots.push({ filePath, snapshot })
+      if (isCanvasSnapshot(snapshot)) snapshots.push({ filePath, snapshot })
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
@@ -373,26 +381,9 @@ async function loadCanvasSnapshot() {
 
 async function writeJsonAtomic(filePath, payload) {
   await mkdir(dirname(filePath), { recursive: true })
-  const tempFile = `${filePath}.${process.pid}.tmp`
+  const tempFile = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`
   await writeFile(tempFile, `${JSON.stringify(payload, null, 2)}\n`)
   await rename(tempFile, filePath)
-}
-
-async function removeStalePageDirs(currentPageIds) {
-  let entries
-  try {
-    entries = await readdir(canvasPagesDir, { withFileTypes: true })
-  } catch (error) {
-    if (error.code === 'ENOENT') return
-    throw error
-  }
-
-  const currentDirNames = new Set([...currentPageIds].map(pageDirName))
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory() && !currentDirNames.has(entry.name))
-      .map((entry) => rm(join(canvasPagesDir, entry.name), { recursive: true, force: true }))
-  )
 }
 
 async function saveCanvasSnapshot(snapshot) {
@@ -401,9 +392,6 @@ async function saveCanvasSnapshot(snapshot) {
     await writeJsonAtomic(canvasFile, snapshot)
     return { storage: 'legacy-single-file', paths: [canvasFile] }
   }
-
-  const currentPageIds = new Set(pages.map((page) => page.id))
-  await removeStalePageDirs(currentPageIds)
 
   const paths = []
   for (const page of pages) {
@@ -596,13 +584,22 @@ function canvasStoragePlugin() {
           if (req.method === 'PUT') {
             const body = await readRequestBody(req)
             const snapshot = JSON.parse(body)
-            if (!snapshot || typeof snapshot !== 'object' || !snapshot.store || !snapshot.schema) {
+            if (!isCanvasSnapshot(snapshot)) {
               sendJson(res, 400, { error: 'Expected a tldraw store snapshot.' })
               return
             }
 
-            const result = await saveCanvasSnapshot(snapshot)
-            sendJson(res, 200, { ok: true, ...result })
+            const sanitized = await sanitizeCanvasSnapshotForServer(snapshot)
+            if (!sanitized.snapshot) {
+              sendJson(res, 400, {
+                error: 'Invalid tldraw store snapshot.',
+                skippedRecords: sanitized.skippedRecords
+              })
+              return
+            }
+
+            const result = await saveCanvasSnapshot(sanitized.snapshot)
+            sendJson(res, 200, { ok: true, ...result, skippedRecords: sanitized.skippedRecords })
             broadcastCanvasChanged(result)
             return
           }

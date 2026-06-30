@@ -45,6 +45,7 @@ import {
 import { AllSelection } from '@tiptap/pm/state'
 import 'tldraw/tldraw.css'
 import { useCallback, useEffect, useState } from 'react'
+import { CowartMainMenu } from './CowartModelProviderMenu.jsx'
 import annotationToolIconRaw from './assets/tool-comment.svg?raw'
 import {
   describeSkippedRecord,
@@ -594,6 +595,7 @@ const cowartUiOverrides = {
 }
 
 const cowartComponents = {
+  MainMenu: CowartMainMenu,
   Toolbar: CowartToolbar,
   StylePanel: CowartStylePanel
 }
@@ -1082,10 +1084,7 @@ export default function App() {
     const selectionStateTimer = window.setInterval(syncSelectionState, 250)
 
     async function syncViewState() {
-      const viewStateSnapshot = {
-        ...getCowartViewState(editor),
-        updatedAt: new Date().toISOString()
-      }
+      const viewStateSnapshot = getCowartViewState(editor)
 
       const nextViewState = JSON.stringify(viewStateSnapshot)
       if (nextViewState === lastSyncedViewState) return
@@ -1101,7 +1100,10 @@ export default function App() {
         const response = await fetch(VIEW_STATE_ENDPOINT, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
-          body: nextViewState
+          body: JSON.stringify({
+            ...viewStateSnapshot,
+            updatedAt: new Date().toISOString()
+          })
         })
         if (!response.ok) {
           throw new Error(`Failed to save view state: ${response.status}`)

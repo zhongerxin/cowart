@@ -151,6 +151,30 @@ npm run build
 - `COWART_PROJECT_DIR`：画布数据所属的用户项目目录。
 - `COWART_CANVAS_DIR`：画布数据目录，默认是 `$COWART_PROJECT_DIR/canvas`。
 
+### 可选：接入阿里 DashScope / 千问 / 万相图片模型
+
+Cowart 默认仍使用 Codex 内置的 OpenAI 图片生成能力。左上角主菜单里有 `模型选择`，默认是 `OpenAI`；用户可以切换到 `阿里千问`，Cowart 会把选择保存到当前项目的 `canvas/cowart-model-preferences.json`。只有当用户在页面选择阿里、显式要求使用阿里模型，或设置下面的 provider 环境变量时，才会走 DashScope，不会影响原来的 OpenAI 生成流程。
+
+也可以直接在前端填写阿里配置：打开左上角主菜单，选择 `模型选择` → `配置阿里千问`，填写 `DASHSCOPE_API_KEY`、`DASHSCOPE_BASE_URL` 和模型名。API Key 会保存到本机用户目录里的 Cowart 配置文件，不会写入当前项目的 `canvas/`。
+
+```bash
+export COWART_IMAGE_PROVIDER=dashscope
+export DASHSCOPE_API_KEY=sk-...
+export DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/api/v1
+export COWART_DASHSCOPE_IMAGE_MODEL=wan2.7-image-pro
+```
+
+也可以只在需要时手动生成一张本地图片：
+
+```bash
+node scripts/generate-dashscope-image.mjs \
+  --prompt "一张适合 3:4 画布的产品海报，干净高级，有中文标题" \
+  --width 512 \
+  --height 683
+```
+
+脚本会输出包含 `outputPath` 的 JSON。把这个本地图片路径交给 Cowart 插入流程即可。`wan2.7-image-pro` 属于阿里万相 Wan 图片模型；如果你要换成千问图片模型，可以把 `COWART_DASHSCOPE_IMAGE_MODEL` 改为对应的 Qwen Image 模型名。
+
 ## 开发者
 
 ZHONG XIN  

@@ -103,6 +103,194 @@ body {
   border-radius: 1px;
 }
 
+.cowart-config-backdrop {
+  position: fixed;
+  z-index: 2147483000;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: rgb(20 24 31 / 24%);
+}
+
+.cowart-config-dialog {
+  display: grid;
+  width: min(440px, calc(100vw - 32px));
+  padding: 16px;
+  gap: 14px;
+  color: var(--tl-color-text);
+  background: #fff;
+  border: 1px solid var(--tl-color-muted-1);
+  border-radius: 8px;
+  box-shadow: 0 18px 54px rgb(15 23 42 / 24%);
+}
+
+.cowart-config-toast {
+  position: fixed;
+  z-index: 2147483001;
+  top: 24px;
+  left: 50%;
+  padding: 8px 14px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  background: #1f2937;
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 22%);
+  transform: translateX(-50%);
+}
+
+.cowart-config-dialog-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cowart-config-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.cowart-config-dialog-header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  color: var(--tl-color-text-2);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  border-radius: var(--tl-radius-2);
+  cursor: pointer;
+}
+
+.cowart-config-dialog-header button:hover {
+  background: var(--tl-color-muted-2);
+  color: var(--tl-color-text);
+}
+
+.cowart-config-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.cowart-config-field span {
+  color: var(--tl-color-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.cowart-config-field input {
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  color: var(--tl-color-text);
+  font: inherit;
+  font-size: 13px;
+  background: var(--tl-color-muted-2);
+  border: 1px solid #f0f0f0;
+  border-radius: var(--tl-radius-2);
+  outline: 0;
+}
+
+.cowart-config-field input:focus {
+  background: #fff;
+  border-color: #2f80ed;
+  box-shadow: 0 0 0 2px rgb(47 128 237 / 14%);
+}
+
+.cowart-config-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cowart-config-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--tl-color-text-2);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.cowart-config-actions button {
+  height: 34px;
+  padding: 0 14px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: #2f80ed;
+  border: 0;
+  border-radius: var(--tl-radius-2);
+  cursor: pointer;
+}
+
+.cowart-config-actions .cowart-config-cancel {
+  color: var(--tl-color-text);
+  background: #e5e7eb;
+}
+
+.cowart-config-actions .cowart-config-cancel:hover {
+  background: #d1d5db;
+}
+
+.cowart-config-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.cowart-provider-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
+.cowart-provider-menu-check {
+  display: inline-grid;
+  flex: 0 0 16px;
+  width: 16px;
+  place-items: center;
+  color: currentColor;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cowart-provider-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1;
+  text-align: left;
+}
+
+.cowart-provider-menu-config {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: #2f80ed;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cowart-provider-menu-config:hover {
+  color: #1c5fb8;
+  text-decoration: underline;
+}
+
 .tlui-button__tool.cowart-annotation-toolbar-button {
   display: inline-flex;
   width: auto;

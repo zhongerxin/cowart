@@ -151,6 +151,30 @@ Useful environment variables:
 - `COWART_PROJECT_DIR`: the user project directory that owns the canvas data.
 - `COWART_CANVAS_DIR`: canvas data directory, default `$COWART_PROJECT_DIR/canvas`.
 
+### Optional: Alibaba DashScope / Qwen / Wan Image Models
+
+Cowart still uses the built-in OpenAI image generation flow by default. The top-left main menu includes `模型选择`; it defaults to `OpenAI`, and users can switch it to `阿里千问`. Cowart saves that preference to the current project's `canvas/cowart-model-preferences.json`. DashScope is used only when the user selects Alibaba in the UI, explicitly asks for an Alibaba model, or sets the provider environment variable below, so the existing OpenAI workflow is unaffected.
+
+Users can also fill the Alibaba config in the UI: open the top-left main menu, choose `模型选择` → `配置阿里千问`, then enter `DASHSCOPE_API_KEY`, `DASHSCOPE_BASE_URL`, and the model name. The API key is saved in the machine-local Cowart config directory, not in the current project's `canvas/` folder.
+
+```bash
+export COWART_IMAGE_PROVIDER=dashscope
+export DASHSCOPE_API_KEY=sk-...
+export DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/api/v1
+export COWART_DASHSCOPE_IMAGE_MODEL=wan2.7-image-pro
+```
+
+You can also generate a local image only when needed:
+
+```bash
+node scripts/generate-dashscope-image.mjs \
+  --prompt "A polished 3:4 product poster with Chinese title text" \
+  --width 512 \
+  --height 683
+```
+
+The script prints JSON containing `outputPath`. Use that local file path with Cowart's normal image insertion workflow. `wan2.7-image-pro` is an Alibaba Wan image model; to use a Qwen Image model, set `COWART_DASHSCOPE_IMAGE_MODEL` to the matching Qwen Image model name.
+
 ## Developer
 
 ZHONG XIN  

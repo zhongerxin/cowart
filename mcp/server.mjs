@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import readline from "node:readline";
 import { generateKeyBetween } from "fractional-indexing";
@@ -7,6 +8,7 @@ const SERVER_NAME = "Cowart MCP";
 const SERVER_VERSION = "0.1.1";
 const TOOL_GET_SELECTION = "get_cowart_selection";
 const TOOL_INSERT_IMAGE = "insert_cowart_image";
+const TOOL_GET_MODEL_PREFERENCES = "get_cowart_model_preferences";
 const PAGE_ID_PREFIX = "page:";
 const PAGE_ASSETS_ROUTE = "/page-assets/";
 const CANVAS_FILE_NAME = "cowart-canvas.json";
@@ -62,6 +64,40 @@ function resolveSelectionFile(args = {}) {
 
 function resolveViewStateFile(args = {}) {
   return join(resolveCanvasDir(args), "cowart-view-state.json");
+}
+
+function resolveModelPreferencesFile(args = {}) {
+  return join(resolveCanvasDir(args), "cowart-model-preferences.json");
+}
+
+function defaultModelPreferences() {
+  return {
+    version: 1,
+    imageProvider: "openai",
+    imageModel: "openai",
+    updatedAt: null,
+  };
+}
+
+function resolveDashscopeConfigFile() {
+  const explicitConfig = nonEmptyString(process.env.COWART_DASHSCOPE_CONFIG);
+  if (explicitConfig) return pathResolve(explicitConfig);
+
+  const configDir =
+    nonEmptyString(process.env.COWART_CONFIG_DIR) ||
+    (nonEmptyString(process.env.APPDATA) ? join(process.env.APPDATA, "Cowart") : join(homedir(), ".cowart"));
+  return join(configDir, "dashscope-config.json");
+}
+
+function publicDashscopeConfig(config) {
+  const apiKey = typeof config?.apiKey === "string" ? config.apiKey : "";
+  return {
+    configured: apiKey.trim().length > 0,
+    baseUrl: typeof config?.baseUrl === "string" ? config.baseUrl : "",
+    model: typeof config?.model === "string" && config.model.trim() ? config.model : "wan2.7-image-pro",
+    apiKeyPreview: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : "",
+    updatedAt: config?.updatedAt ?? null,
+  };
 }
 
 function pageDirName(pageId) {
@@ -173,6 +209,25 @@ async function readViewState(args) {
     return payload?.viewState ?? payload;
   } catch (error) {
     if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function readModelPreferences(args) {
+  const modelPreferencesFile = resolveModelPreferencesFile(args);
+  const dashscopeConfigFile = resolveDashscopeConfigFile();
+  let dashscopeConfig = publicDashscopeConfig({});
+  try {
+    dashscopeConfig = publicDashscopeConfig(JSON.parse(await readFile(dashscopeConfigFile, "utf8")));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  try {
+    const preferences = JSON.parse(await readFile(modelPreferencesFile, "utf8"));
+    return { preferences: { ...defaultModelPreferences(), ...preferences }, modelPreferencesFile, dashscopeConfig, dashscopeConfigFile };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { preferences: defaultModelPreferences(), modelPreferencesFile, dashscopeConfig, dashscopeConfigFile };
     throw error;
   }
 }
@@ -510,6 +565,32 @@ function toolDefinitions() {
       },
     },
     {
+      name: TOOL_GET_MODEL_PREFERENCES,
+      title: "Get Cowart Model Preferences",
+      description:
+        "Return the Cowart image model preference selected in the canvas UI. Defaults to OpenAI when no preference file exists.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectDir: {
+            type: "string",
+            description: "Absolute Cowart project directory. The tool reads <projectDir>/canvas/cowart-model-preferences.json.",
+          },
+          canvasDir: {
+            type: "string",
+            description: "Absolute canvas directory. If provided, this takes precedence over projectDir.",
+          },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
       name: TOOL_INSERT_IMAGE,
       title: "Insert Cowart Image",
       description:
@@ -580,6 +661,16 @@ async function handleToolCall(id, params) {
         },
       ],
       structuredContent: result,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_GET_MODEL_PREFERENCES) {
+    const { preferences, modelPreferencesFile, dashscopeConfig, dashscopeConfigFile } = await readModelPreferences(params.arguments ?? {});
+    const providerLabel = preferences.imageProvider === "dashscope" ? "DashScope / Alibaba" : "OpenAI";
+    sendResult(id, {
+      content: [{ type: "text", text: `Cowart image provider: ${providerLabel} (${preferences.imageModel || "default"}).` }],
+      structuredContent: { preferences, modelPreferencesFile, dashscopeConfig, dashscopeConfigFile },
     });
     return;
   }

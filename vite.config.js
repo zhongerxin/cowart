@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 const projectDir = resolve(process.env.COWART_PROJECT_DIR ?? process.cwd())
@@ -10,6 +11,12 @@ const canvasDir = resolve(process.env.COWART_CANVAS_DIR ?? join(projectDir, 'can
 const canvasFile = join(canvasDir, 'cowart-canvas.json')
 const selectionFile = join(canvasDir, 'cowart-selection.json')
 const viewStateFile = join(canvasDir, 'cowart-view-state.json')
+const modelPreferencesFile = join(canvasDir, 'cowart-model-preferences.json')
+const userConfigDir = resolve(
+  process.env.COWART_CONFIG_DIR ??
+    (process.env.APPDATA ? join(process.env.APPDATA, 'Cowart') : join(homedir(), '.cowart'))
+)
+const dashscopeConfigFile = join(userConfigDir, 'dashscope-config.json')
 const canvasPagesDir = join(canvasDir, 'pages')
 const canvasAssetsDir = join(canvasDir, 'assets')
 const pagesManifestFile = join(canvasPagesDir, 'manifest.json')
@@ -112,6 +119,46 @@ function isViewState(value) {
     isFiniteNumber(value.camera.y) &&
     isFiniteNumber(value.camera.z)
   )
+}
+
+function defaultModelPreferences() {
+  return {
+    version: 1,
+    imageProvider: 'openai',
+    imageModel: 'openai',
+    updatedAt: null
+  }
+}
+
+function isModelPreferences(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    value.version === 1 &&
+    ['openai', 'dashscope'].includes(value.imageProvider) &&
+    (typeof value.imageModel === 'string' || value.imageModel === null)
+  )
+}
+
+function isDashscopeConfig(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.apiKey === 'string' &&
+    typeof value.baseUrl === 'string' &&
+    typeof value.model === 'string'
+  )
+}
+
+function publicDashscopeConfig(config) {
+  const apiKey = typeof config?.apiKey === 'string' ? config.apiKey : ''
+  return {
+    configured: apiKey.trim().length > 0,
+    baseUrl: typeof config?.baseUrl === 'string' ? config.baseUrl : '',
+    model: typeof config?.model === 'string' && config.model.trim() ? config.model : 'wan2.7-image-pro',
+    apiKeyPreview: apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : '',
+    updatedAt: config?.updatedAt ?? null
+  }
 }
 
 function isSafeChildPath(parent, child) {
@@ -562,6 +609,116 @@ function canvasStoragePlugin() {
 
             await writeJsonAtomic(viewStateFile, viewState)
             sendJson(res, 200, { ok: true, path: viewStateFile })
+            return
+          }
+
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/model-preferences', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            try {
+              sendJson(res, 200, {
+                preferences: await readJsonFile(modelPreferencesFile),
+                path: modelPreferencesFile
+              })
+            } catch (error) {
+              if (error.code === 'ENOENT') {
+                sendJson(res, 200, {
+                  preferences: defaultModelPreferences(),
+                  path: modelPreferencesFile
+                })
+                return
+              }
+              throw error
+            }
+            return
+          }
+
+          if (req.method === 'PUT') {
+            const body = await readRequestBody(req)
+            const preferences = JSON.parse(body)
+            if (!isModelPreferences(preferences)) {
+              sendJson(res, 400, { error: 'Expected Cowart model preferences.' })
+              return
+            }
+
+            await writeJsonAtomic(modelPreferencesFile, {
+              ...preferences,
+              updatedAt: new Date().toISOString()
+            })
+            sendJson(res, 200, { ok: true, path: modelPreferencesFile })
+            return
+          }
+
+          res.statusCode = 405
+          res.setHeader('allow', 'GET, PUT')
+          res.end()
+        } catch (error) {
+          sendJson(res, 500, { error: error.message })
+        }
+      })
+
+      server.middlewares.use('/api/dashscope-config', async (req, res) => {
+        try {
+          if (req.method === 'GET') {
+            try {
+              sendJson(res, 200, {
+                config: publicDashscopeConfig(await readJsonFile(dashscopeConfigFile)),
+                path: dashscopeConfigFile
+              })
+            } catch (error) {
+              if (error.code === 'ENOENT') {
+                sendJson(res, 200, {
+                  config: publicDashscopeConfig({}),
+                  path: dashscopeConfigFile
+                })
+                return
+              }
+              throw error
+            }
+            return
+          }
+
+          if (req.method === 'PUT') {
+            const body = await readRequestBody(req)
+            const config = JSON.parse(body)
+            if (!isDashscopeConfig(config)) {
+              sendJson(res, 400, { error: 'Expected DashScope config.' })
+              return
+            }
+
+            let existingConfig = {}
+            try {
+              existingConfig = await readJsonFile(dashscopeConfigFile)
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error
+            }
+
+            const apiKey = config.apiKey.trim() || existingConfig.apiKey || ''
+            if (!apiKey) {
+              sendJson(res, 400, { error: 'DASHSCOPE_API_KEY is required.' })
+              return
+            }
+
+            const savedConfig = {
+              apiKey,
+              baseUrl: config.baseUrl.trim().replace(/\/+$/, ''),
+              model: config.model.trim() || 'wan2.7-image-pro',
+              updatedAt: new Date().toISOString()
+            }
+            await writeJsonAtomic(dashscopeConfigFile, savedConfig)
+            sendJson(res, 200, {
+              ok: true,
+              config: publicDashscopeConfig(savedConfig),
+              path: dashscopeConfigFile
+            })
             return
           }
 

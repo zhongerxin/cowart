@@ -77,7 +77,42 @@ meta flag. Support both shapes.
 
    Standalone workflow: when no AI holder is selected, generate the image anyway and insert it as a normal image shape on the current page. Prefer the current page from Cowart view state; if there is a selected non-holder shape and it is useful as context, place the image beside it, otherwise place it in a clear page area. If the user requested a size or aspect ratio, pass that size and ratio into generation and use it for display. Otherwise, use the generated bitmap's natural aspect ratio and a practical display width such as 512 canvas units.
 
-4. Generate the bitmap with the built-in `imagegen` skill unless the user explicitly requests another image path. If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
+4. Generate the bitmap with the configured provider. The default provider is OpenAI through the built-in `imagegen` skill; this must remain the fallback when no provider is configured. Before generation, read the Cowart model preference from `canvas/cowart-model-preferences.json` or the Cowart MCP `get_cowart_model_preferences` tool when available. Only use DashScope / Alibaba Qwen or Wan image generation when the user explicitly asks for it in the current request, when the Cowart UI preference has `imageProvider: "dashscope"`, or when `COWART_IMAGE_PROVIDER` is set to `dashscope`, `aliyun`, or `qwen`.
+
+   Provider selection:
+
+   - Default/OpenAI: use the built-in `imagegen` skill unless the user explicitly requests another image path or configured provider.
+   - DashScope/Alibaba: run `scripts/generate-dashscope-image.mjs` from the Cowart plugin directory to create a local bitmap file, then continue with the same Cowart insertion workflow. Use `preferences.imageModel` from `cowart-model-preferences.json` when it is present; otherwise use `COWART_DASHSCOPE_IMAGE_MODEL` or the script default.
+
+   For DashScope, required environment:
+
+   ```text
+   DASHSCOPE_API_KEY=<api-key>
+   DASHSCOPE_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/api/v1
+   ```
+
+   The user can also configure DashScope from the Cowart UI instead of environment variables: open the main menu, choose `模型选择` → `配置阿里千问`, then fill `DASHSCOPE_API_KEY`, `DASHSCOPE_BASE_URL`, and the model name. Cowart stores this machine-local config outside the project, under the user's Cowart config directory. The DashScope generation script reads that config automatically. Environment variables still override the UI config when both are present.
+
+   Optional environment:
+
+   ```text
+   COWART_IMAGE_PROVIDER=dashscope
+   COWART_DASHSCOPE_IMAGE_MODEL=wan2.7-image-pro
+   COWART_DASHSCOPE_IMAGE_SIZE=2K
+   ```
+
+   Example DashScope generation command:
+
+   ```bash
+   node scripts/generate-dashscope-image.mjs \
+     --prompt "Target canvas slot: 512 x 683 canvas units. Target aspect ratio: 3:4. Generate ..." \
+     --width 512 \
+     --height 683
+   ```
+
+   The script prints JSON containing `outputPath`. Use that exact local image path for insertion. Do not use DashScope if the script fails or the required environment variables are missing; tell the user what is missing instead of silently falling back to a different provider after they explicitly requested Alibaba/Qwen/Wan.
+
+   If the requested asset needs visible copy, labels, poster text, ad text, UI text, or typography, include that text directly in the image generation prompt and let the selected image model produce the final bitmap. Do not default to generating a text-free background and then adding text locally unless the user explicitly asks for local typography, deterministic text overlay, SVG/vector output, or another non-imagegen layout step.
 
    For the holder workflow, the image generation request must explicitly include the selected holder's target size and aspect ratio. Add this information to the model prompt, for example:
 
